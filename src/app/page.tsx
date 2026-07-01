@@ -14,6 +14,7 @@ import {
   BookMarked,
   FileText,
   AlertCircle,
+  Settings2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -26,8 +27,11 @@ import { VocabularyList } from "@/components/english-learning/VocabularyList";
 import { QuizView } from "@/components/english-learning/QuizView";
 import { SummaryView } from "@/components/english-learning/SummaryView";
 import { SavedVocabDrawer } from "@/components/english-learning/SavedVocabDrawer";
+import { SettingsDialog } from "@/components/english-learning/SettingsDialog";
 import { SAMPLE_TEXTS } from "@/lib/english-learning/samples";
 import { useSavedVocab } from "@/lib/english-learning/useSavedVocab";
+import { useApiConfig } from "@/lib/english-learning/useApiConfig";
+import { safeFetchJson } from "@/lib/english-learning/safe-fetch";
 import type { AnalysisResult, VocabItem } from "@/lib/english-learning/types";
 
 const MAX_CHARS = 8000;
@@ -40,8 +44,10 @@ export default function Home() {
   const [result, setResult] = useState<AnalysisResult | null>(null);
   const [analyzedText, setAnalyzedText] = useState<string>("");
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
   const savedVocab = useSavedVocab();
+  const { config: apiConfig } = useApiConfig();
 
   const savedWords = useMemo(() => {
     return new Set(savedVocab.saved.map((v) => v.word.toLowerCase()));
@@ -56,18 +62,16 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/analyze", {
+      const result = await safeFetchJson<AnalysisResult>("/api/analyze", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: trimmed }),
+        body: JSON.stringify({ text: trimmed, config: apiConfig }),
       });
-      const data = (await res.json()) as AnalysisResult | { error: string };
-      if (!res.ok) {
-        const msg =
-          (data as { error?: string }).error ?? "分析失败，请稍后重试。";
+      if (!result.ok || !result.data) {
+        const msg = result.error || "分析失败，请稍后重试。";
         throw new Error(msg);
       }
-      const r = data as AnalysisResult;
+      const r = result.data;
       setResult(r);
       setAnalyzedText(trimmed);
       toast.success("分析完成", {
@@ -80,7 +84,7 @@ export default function Home() {
     } finally {
       setLoading(false);
     }
-  }, [text]);
+  }, [text, apiConfig]);
 
   const handleSample = useCallback((sampleText: string) => {
     setText(sampleText);
@@ -130,23 +134,45 @@ export default function Home() {
               </div>
             </div>
           </div>
-          <Button
-            variant="outline"
-            size="sm"
-            className="gap-2"
-            onClick={() => setDrawerOpen(true)}
-          >
-            <Bookmark className="h-4 w-4" />
-            生词本
-            {savedVocab.saved.length > 0 ? (
-              <Badge
-                variant="secondary"
-                className="ml-0.5 h-5 min-w-5 justify-center bg-primary/10 px-1.5 text-[11px] text-primary"
-              >
-                {savedVocab.saved.length}
-              </Badge>
-            ) : null}
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => setSettingsOpen(true)}
+              title="AI 模型设置"
+            >
+              <Settings2 className="h-4 w-4" />
+              <span className="hidden sm:inline">
+                {apiConfig.enabled ? "自定义 API" : "AI 设置"}
+              </span>
+              {apiConfig.enabled ? (
+                <Badge
+                  variant="secondary"
+                  className="ml-0.5 h-5 justify-center bg-amber-100/70 px-1.5 text-[11px] text-amber-900"
+                >
+                  ON
+                </Badge>
+              ) : null}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => setDrawerOpen(true)}
+            >
+              <Bookmark className="h-4 w-4" />
+              <span className="hidden sm:inline">生词本</span>
+              {savedVocab.saved.length > 0 ? (
+                <Badge
+                  variant="secondary"
+                  className="ml-0.5 h-5 min-w-5 justify-center bg-primary/10 px-1.5 text-[11px] text-primary"
+                >
+                  {savedVocab.saved.length}
+                </Badge>
+              ) : null}
+            </Button>
+          </div>
         </div>
       </header>
 
@@ -386,6 +412,7 @@ export default function Home() {
                   vocabulary={result.vocabulary}
                   savedWords={savedWords}
                   onToggleSave={handleToggleSave}
+                  apiConfig={apiConfig}
                 />
               </TabsContent>
 
@@ -436,6 +463,8 @@ export default function Home() {
         onRemove={savedVocab.remove}
         onClear={savedVocab.clear}
       />
+
+      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }

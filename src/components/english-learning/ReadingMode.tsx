@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { Volume2, Pause, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { WordPopover } from "./WordPopover";
-import type { VocabItem } from "@/lib/english-learning/types";
+import type { ApiConfig, VocabItem } from "@/lib/english-learning/types";
 import { useTTS } from "@/lib/english-learning/useTTS";
 import { cn } from "@/lib/utils";
 
@@ -13,6 +13,7 @@ interface ReadingModeProps {
   vocabulary: VocabItem[];
   savedWords: Set<string>;
   onToggleSave: (item: VocabItem) => void;
+  apiConfig?: ApiConfig | null;
 }
 
 // Split a paragraph into tokens: words + non-words (whitespace/punctuation).
@@ -62,6 +63,7 @@ export function ReadingMode({
   vocabulary,
   savedWords,
   onToggleSave,
+  apiConfig,
 }: ReadingModeProps) {
   const tts = useTTS();
 
@@ -174,6 +176,7 @@ export function ReadingMode({
                     onSpeak={tts.speak}
                     speakingKey={tts.speakingKey}
                     highlighted={highlighted}
+                    apiConfig={apiConfig}
                   >
                     {tok.value}
                   </WordPopover>

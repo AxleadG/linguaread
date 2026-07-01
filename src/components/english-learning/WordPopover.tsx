@@ -9,7 +9,12 @@ import {
 } from "@/components/ui/popover";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
-import type { VocabItem, WordLookupResult } from "@/lib/english-learning/types";
+import type {
+  ApiConfig,
+  VocabItem,
+  WordLookupResult,
+} from "@/lib/english-learning/types";
+import { safeFetchJson } from "@/lib/english-learning/safe-fetch";
 
 interface WordPopoverProps {
   word: string;
@@ -24,6 +29,8 @@ interface WordPopoverProps {
   speakingKey?: string | null;
   /** Whether this word is part of the AI-highlighted vocabulary list. */
   highlighted?: boolean;
+  /** Optional custom API config to relay to /api/word. */
+  apiConfig?: ApiConfig | null;
   children?: React.ReactNode;
 }
 
@@ -36,6 +43,7 @@ export function WordPopover({
   onSpeak,
   speakingKey,
   highlighted,
+  apiConfig,
   children,
 }: WordPopoverProps) {
   const [open, setOpen] = useState(false);
@@ -54,24 +62,22 @@ export function WordPopover({
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch("/api/word", {
+      const result = await safeFetchJson<WordLookupResult>("/api/word", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ word, context }),
+        body: JSON.stringify({ word, context, config: apiConfig }),
       });
-      if (!res.ok) {
-        const err = (await res.json().catch(() => null)) as { error?: string } | null;
-        throw new Error(err?.error || "Lookup failed");
+      if (!result.ok || !result.data) {
+        throw new Error(result.error || "查词失败");
       }
-      const json = (await res.json()) as WordLookupResult;
-      setData(json);
+      setData(result.data);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Lookup failed");
+      setError(e instanceof Error ? e.message : "查词失败");
       fetchedRef.current = false;
     } finally {
       setLoading(false);
     }
-  }, [preset, word, context]);
+  }, [preset, word, context, apiConfig]);
 
   useEffect(() => {
     if (open) {

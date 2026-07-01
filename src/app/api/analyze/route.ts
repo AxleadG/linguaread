@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import ZAI from "z-ai-web-dev-sdk";
 import { jsonrepair } from "jsonrepair";
-import type { AnalysisResult } from "@/lib/english-learning/types";
+import type { AnalysisResult, ApiConfig } from "@/lib/english-learning/types";
+import { chat, LlmError } from "@/lib/english-learning/llm-client";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -186,9 +186,9 @@ function normalize(raw: RawAnalysis): AnalysisResult {
 }
 
 export async function POST(req: NextRequest) {
-  let body: { text?: string };
+  let body: { text?: string; config?: ApiConfig };
   try {
-    body = (await req.json()) as { text?: string };
+    body = (await req.json()) as { text?: string; config?: ApiConfig };
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -210,18 +210,19 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const config = body.config;
+  const usingCustom = Boolean(config?.enabled);
+
   try {
-    const zai = await ZAI.create();
-    const completion = await zai.chat.completions.create({
-      messages: [
+    const { content } = await chat(
+      [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: text },
       ],
-      thinking: { type: "disabled" },
-      temperature: 0.4,
-    });
+      config,
+      { temperature: 0.4 },
+    );
 
-    const content = completion.choices[0]?.message?.content ?? "";
     if (!content) {
       return NextResponse.json(
         { error: "AI returned an empty response. Please try again." },
@@ -238,13 +239,27 @@ export async function POST(req: NextRequest) {
       result.questions.length === 0
     ) {
       return NextResponse.json(
-        { error: "AI response was unparseable. Please try again." },
+        {
+          error: usingCustom
+            ? "AI 返回了无法解析的内容。请检查自定义 API 配置（模型是否支持中文 / JSON 输出），或重试一次。"
+            : "AI response was unparseable. Please try again.",
+        },
         { status: 502 },
       );
     }
 
     return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof LlmError) {
+      console.error("[/api/analyze] LlmError:", err.message, {
+        status: err.status,
+        upstream: err.upstream,
+      });
+      return NextResponse.json(
+        { error: err.message },
+        { status: typeof err.status === "number" ? err.status : 500 },
+      );
+    }
     const message =
       err instanceof Error ? err.message : "Unknown server error";
     console.error("[/api/analyze] error:", message);

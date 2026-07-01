@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import ZAI from "z-ai-web-dev-sdk";
 import { jsonrepair } from "jsonrepair";
-import type { WordLookupResult } from "@/lib/english-learning/types";
+import type { ApiConfig, WordLookupResult } from "@/lib/english-learning/types";
+import { chat, LlmError } from "@/lib/english-learning/llm-client";
 
 export const runtime = "nodejs";
 export const maxDuration = 30;
@@ -27,9 +27,17 @@ const SYSTEM_PROMPT = `You are an English-to-Chinese dictionary. Given an Englis
 Output ONLY the JSON object. No surrounding text, no markdown fences. Double-escape any double quote inside a string value as \\". Do not include literal newlines inside strings — use \\n instead.`;
 
 export async function POST(req: NextRequest) {
-  let body: { word?: string; context?: string };
+  let body: {
+    word?: string;
+    context?: string;
+    config?: ApiConfig;
+  };
   try {
-    body = (await req.json()) as { word?: string; context?: string };
+    body = (await req.json()) as {
+      word?: string;
+      context?: string;
+      config?: ApiConfig;
+    };
   } catch {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
@@ -51,17 +59,15 @@ export async function POST(req: NextRequest) {
     : `Word: "${word}"`;
 
   try {
-    const zai = await ZAI.create();
-    const completion = await zai.chat.completions.create({
-      messages: [
+    const { content } = await chat(
+      [
         { role: "system", content: SYSTEM_PROMPT },
         { role: "user", content: userPrompt },
       ],
-      thinking: { type: "disabled" },
-      temperature: 0.3,
-    });
+      body.config,
+      { temperature: 0.3 },
+    );
 
-    const content = completion.choices[0]?.message?.content ?? "";
     if (!content) {
       return NextResponse.json(
         { error: "AI returned an empty response." },
@@ -120,6 +126,16 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (err) {
+    if (err instanceof LlmError) {
+      console.error("[/api/word] LlmError:", err.message, {
+        status: err.status,
+        upstream: err.upstream,
+      });
+      return NextResponse.json(
+        { error: err.message },
+        { status: typeof err.status === "number" ? err.status : 500 },
+      );
+    }
     const message =
       err instanceof Error ? err.message : "Unknown server error";
     console.error("[/api/word] error:", message);
