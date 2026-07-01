@@ -30,23 +30,42 @@ function subscribeSupported(callback: () => void): () => void {
  * objects. Voices are populated asynchronously (the browser may need to
  * query the OS), so we subscribe to the `voiceschanged` event and also
  * poll a few times as a fallback (Chrome sometimes never fires the event).
+ *
+ * IMPORTANT: `speechSynthesis.getVoices()` returns a NEW array instance on
+ * every call, even when the underlying voices haven't changed. React's
+ * `useSyncExternalStore` requires `getSnapshot` to return the same reference
+ * when nothing has changed, otherwise it loops forever. So we cache the
+ * array and only replace it when the set of voiceURIs actually changes.
  */
-let voicesCache: SpeechSynthesisVoice[] | null = null;
 // Stable empty array reference so useSyncExternalStore doesn't loop when
 // voices are still loading.
 const EMPTY_VOICES: SpeechSynthesisVoice[] = [];
+let voicesCache: SpeechSynthesisVoice[] = EMPTY_VOICES;
+let voicesKeyCache: string = "";
 const VOICES_EVENT = "english-learning:voices-changed";
+
+/** Build a stable string key from a voices array (by voiceURI + lang). */
+function voicesKey(voices: SpeechSynthesisVoice[]): string {
+  return voices.map((v) => `${v.voiceURI}|${v.lang}`).join(",");
+}
 
 function readVoices(): SpeechSynthesisVoice[] {
   if (typeof window === "undefined" || !("speechSynthesis" in window)) {
     return EMPTY_VOICES;
   }
   const fresh = window.speechSynthesis.getVoices();
-  if (fresh.length > 0) {
-    voicesCache = fresh;
-    return fresh;
+  if (fresh.length === 0) {
+    // Still loading; keep returning the cached array (may be EMPTY_VOICES).
+    return voicesCache;
   }
-  return voicesCache ?? EMPTY_VOICES;
+  const key = voicesKey(fresh);
+  if (key !== voicesKeyCache) {
+    // Real change: update cache and key.
+    voicesCache = fresh;
+    voicesKeyCache = key;
+  }
+  // Always return the cached reference (stable across calls).
+  return voicesCache;
 }
 
 function notifyVoicesChanged() {
@@ -59,7 +78,8 @@ function subscribeVoices(callback: () => void): () => void {
     return () => {};
   }
   const handler = () => {
-    voicesCache = null; // invalidate
+    // Don't invalidate the cache here; readVoices() will compare keys and
+    // only update if the content actually changed.
     callback();
   };
   window.speechSynthesis.addEventListener("voiceschanged", handler);
@@ -72,7 +92,6 @@ function subscribeVoices(callback: () => void): () => void {
     polls += 1;
     const current = window.speechSynthesis.getVoices();
     if (current.length > 0) {
-      voicesCache = null;
       notifyVoicesChanged();
       window.clearInterval(interval);
       return;
