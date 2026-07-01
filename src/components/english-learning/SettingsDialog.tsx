@@ -212,7 +212,7 @@ function SettingsForm({ initialConfig, onClose }: SettingsFormProps) {
           spellCheck={false}
         />
         <p className="text-[11px] text-muted-foreground">
-          需以 http:// 或 https:// 开头，通常以 /v1 结尾
+          需以 http:// 或 https:// 开头；OpenAI/Kimi/通义通常以 /v1 结尾，DeepSeek 直接填 https://api.deepseek.com
         </p>
       </div>
 

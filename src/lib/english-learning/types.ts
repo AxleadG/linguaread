@@ -92,7 +92,7 @@ export const API_PRESETS: ApiPreset[] = [
   },
   {
     label: "DeepSeek",
-    baseUrl: "https://api.deepseek.com/v1",
+    baseUrl: "https://api.deepseek.com",
     defaultModel: "deepseek-chat",
     models: ["deepseek-chat", "deepseek-reasoner"],
     hint: "https://platform.deepseek.com/api_keys",
