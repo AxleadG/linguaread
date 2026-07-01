@@ -40,6 +40,7 @@ import {
   type ApiPreset,
 } from "@/lib/english-learning/types";
 import { safeFetchJson } from "@/lib/english-learning/safe-fetch";
+import { VoiceSettings } from "./VoiceSettings";
 
 type TestState =
   | { kind: "idle" }
@@ -316,6 +317,9 @@ function SettingsForm({ initialConfig, onClose }: SettingsFormProps) {
         </div>
       ) : null}
 
+      {/* Voice / TTS settings */}
+      <VoiceSettings />
+
       {/* Footer */}
       <div className="flex flex-wrap items-center gap-2 pt-1">
         <Button
@@ -365,10 +369,10 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Settings2 className="h-5 w-5 text-primary" />
-            AI 模型设置
+            AI 模型与朗读设置
           </DialogTitle>
           <DialogDescription>
-            默认使用内置的智谱 GLM。也可以填入任意 OpenAI 兼容 API，密钥仅保存在本地浏览器。
+            配置 AI 模型（默认智谱 GLM，可填自定义 OpenAI 兼容 API）和朗读音色（推荐 Edge 浏览器，自带微软神经语音）。所有数据仅保存在本地浏览器。
           </DialogDescription>
         </DialogHeader>
 
