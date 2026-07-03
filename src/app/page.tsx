@@ -36,6 +36,7 @@ import type { AnalysisResult, VocabItem } from "@/lib/english-learning/types";
 
 const MAX_CHARS = 8000;
 const MIN_CHARS = 20;
+const APP_VERSION = "1.0.0";
 
 export default function Home() {
   const [text, setText] = useState("");
@@ -126,8 +127,11 @@ export default function Home() {
               <BookOpen className="h-4.5 w-4.5" />
             </div>
             <div className="leading-tight">
-              <div className="text-base font-semibold tracking-tight">
+              <div className="flex items-center gap-1.5 text-base font-semibold tracking-tight">
                 LinguaRead
+                <span className="rounded-full border border-border/60 bg-muted/60 px-1.5 py-0 text-[9px] font-medium tabular-nums text-muted-foreground/80">
+                  v{APP_VERSION}
+                </span>
               </div>
               <div className="hidden text-[11px] text-muted-foreground sm:block">
                 AI 英语精读助手
@@ -451,8 +455,17 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t border-border/70 bg-muted/30">
-        <div className="mx-auto w-full max-w-6xl px-4 py-5 text-center text-xs text-muted-foreground sm:px-6">
-          LinguaRead · 基于 AI 的英文精读工具 · 所有生词本仅保存在本地浏览器
+        <div className="mx-auto flex w-full max-w-6xl flex-wrap items-center justify-center gap-x-2 gap-y-1 px-4 py-5 text-center text-xs text-muted-foreground sm:px-6">
+          <span className="flex items-center gap-1.5">
+            LinguaRead
+            <span className="rounded-full border border-border/60 bg-background px-1.5 py-0.5 text-[10px] font-medium tabular-nums text-muted-foreground/80">
+              v{APP_VERSION}
+            </span>
+          </span>
+          <span className="text-border/60">·</span>
+          <span>基于 AI 的英文精读工具</span>
+          <span className="text-border/60">·</span>
+          <span>所有生词本仅保存在本地浏览器</span>
         </div>
       </footer>
 
