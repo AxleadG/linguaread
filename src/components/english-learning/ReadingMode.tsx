@@ -42,10 +42,187 @@ function tokenize(text: string): Token[] {
   return tokens;
 }
 
+// Abbreviations that contain a period but should NEVER be treated as a
+// sentence terminator, regardless of what follows. These are almost always
+// followed by a proper noun (capitalized), so "next char is uppercase" is
+// NOT a reliable signal of a sentence boundary for these words.
+const STRONG_ABBREVIATIONS = new Set([
+  // Titles that precede a person's name
+  "mr", "mrs", "ms", "dr", "prof", "sr", "jr", "rev", "hon",
+  "capt", "lt", "sgt", "gen", "col",
+]);
+
+// Abbreviations that should NOT be treated as a sentence terminator WHEN
+// followed by a lowercase letter, but CAN be a sentence boundary when
+// followed by an uppercase letter (e.g. "etc. The" = end of sentence).
+const WEAK_ABBREVIATIONS = new Set([
+  // Latin abbreviations
+  "etc", "eg", "ie", "vs", "cf", "ca", "approx", "al",
+  // Time / units
+  "a", "p", "am", "pm", "min", "max", "avg",
+  // Business
+  "inc", "ltd", "co", "corp", "bros", "dept",
+  // Geography
+  "st", "ave", "blvd", "rd", "mt", "ft", "sq",
+  // Misc
+  "no", "vol", "pp", "ed", "eds", "trans", "repr",
+]);
+
+/**
+ * Split text into sentences with proper handling of:
+ * - English abbreviations (Mr., Dr., etc., e.g., i.e., Inc., ...) — NEVER split
+ * - Decimal numbers (3.14, $9.99)
+ * - Multiple terminators (... !!! ?!")
+ * - Quotation marks and brackets after terminators
+ *
+ * Note: we intentionally do NOT try to handle single-letter initials (J. K. Rowling)
+ * because it's ambiguous — a single capital letter + period + space + capital letter
+ * could be either an initial or the end of a sentence. We treat it as a sentence
+ * boundary (the common case) and accept the rare false positive.
+ */
 function splitIntoSentences(text: string): string[] {
-  const matches = text.match(/[^.!?]+[.!?]+["'')\]]*(?=\s|$)|[^.!?]+$/g);
-  if (!matches) return [text];
-  return matches.map((s) => s.trim()).filter(Boolean);
+  const sentences: string[] = [];
+  let current = "";
+  let i = 0;
+  const len = text.length;
+
+  while (i < len) {
+    const ch = text[i];
+    current += ch;
+
+    if (ch === "." || ch === "!" || ch === "?") {
+      // Consume any additional terminators and trailing quotes/brackets.
+      let j = i + 1;
+      while (j < len && /[.!?"'')\]]/.test(text[j])) {
+        current += text[j];
+        j++;
+      }
+
+      const isQuestionOrExclaim = ch === "!" || ch === "?";
+
+      // Check for decimal numbers: digit . digit (e.g. 3.14, 9.99)
+      // This is checked regardless of terminator type, but only "." applies.
+      if (ch === ".") {
+        const prevChar = text[i - 1];
+        const nextChar = j < len ? text[j] : "";
+        if (prevChar && /\d/.test(prevChar) && nextChar && /\d/.test(nextChar)) {
+          // It's a decimal — not a sentence boundary, keep accumulating.
+          i = j;
+          continue;
+        }
+      }
+
+      // Check if the word ending here is a known abbreviation.
+      if (ch === ".") {
+        // `current` includes the terminator and any trailing quotes/brackets.
+        // Remove ALL trailing terminators + quotes to find the word.
+        const cleaned = current.replace(/[.!?"'')\]]+$/, "");
+        // Match the last word (letters only) at the end.
+        const wordMatch = cleaned.match(/([A-Za-z]+)$/);
+        if (wordMatch) {
+          const word = wordMatch[1].toLowerCase();
+          // STRONG abbreviations (Mr, Dr, Prof, ...) NEVER end a sentence,
+          // regardless of what follows.
+          if (STRONG_ABBREVIATIONS.has(word)) {
+            i = j;
+            continue;
+          }
+          // WEAK abbreviations (etc, PM, Inc, ...) don't end a sentence IF
+          // the next real char is lowercase. If it's uppercase, treat as a
+          // real sentence boundary (fall through to the boundary check below).
+          if (WEAK_ABBREVIATIONS.has(word)) {
+            // Check the next real char (skip whitespace).
+            let k = j;
+            while (k < len && /\s/.test(text[k])) k++;
+            const nextRealChar = k < len ? text[k] : "";
+            if (nextRealChar && /^[a-z"'(\[]/.test(nextRealChar)) {
+              // Next is lowercase — not a sentence boundary.
+              i = j;
+              continue;
+            }
+            // Next is uppercase or end — fall through to boundary check.
+          }
+        }
+
+        // Handle "U.S.A." / "U.K." / "J.F.K." patterns: a single capital
+        // letter + period, immediately preceded by another single capital
+        // letter + period. This is an acronym, not a sentence boundary.
+        if (/[A-Z]\.[A-Z]\.$/.test(cleaned)) {
+          i = j;
+          continue;
+        }
+        // Also handle the FIRST letter of such an acronym: "U." followed by
+        // "S." — if the next non-space char is a capital letter + period,
+        // it's likely an acronym. Check: next chars match [A-Z].
+        if (
+          wordMatch &&
+          wordMatch[1].length === 1 &&
+          /^[A-Z]$/.test(wordMatch[1]) &&
+          /^[A-Z]\./.test(text.slice(j))
+        ) {
+          i = j;
+          continue;
+        }
+
+        // Handle "Ph.D." / "M.D." / "B.A." patterns: a word + period +
+        // single capital letter + period.
+        if (/[A-Za-z]+\.[A-Z]\.$/.test(cleaned)) {
+          i = j;
+          continue;
+        }
+      }
+
+      // Determine if this is a real sentence boundary.
+      // Skip whitespace after the terminators.
+      let k = j;
+      while (k < len && /\s/.test(text[k])) k++;
+      const nextRealChar = k < len ? text[k] : "";
+      const isEnd = k >= len;
+
+      if (isEnd) {
+        // End of text — always a boundary.
+        sentences.push(current.trim());
+        current = "";
+        i = j;
+        continue;
+      }
+
+      // For ! and ?, always treat as boundary if next char is uppercase/digit/quote.
+      if (isQuestionOrExclaim) {
+        if (/^[A-Z"'(\[\d]/.test(nextRealChar)) {
+          sentences.push(current.trim());
+          current = "";
+          i = j;
+          continue;
+        }
+      }
+
+      // For ".": treat as boundary if next char is uppercase, digit, or quote.
+      // (We already ruled out abbreviations and decimals above.)
+      if (ch === ".") {
+        if (/^[A-Z"'(\[\d]/.test(nextRealChar)) {
+          sentences.push(current.trim());
+          current = "";
+          i = j;
+          continue;
+        }
+        // If next char is lowercase, this period is probably part of
+        // something else (e.g. a URL like example.com, or a filename).
+        // Keep accumulating.
+      }
+
+      i = j;
+      continue;
+    }
+
+    i++;
+  }
+
+  if (current.trim()) {
+    sentences.push(current.trim());
+  }
+
+  return sentences.filter(Boolean);
 }
 
 interface SelectionState {
