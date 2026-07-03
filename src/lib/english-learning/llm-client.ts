@@ -220,11 +220,124 @@ async function callZaiSdk(
 }
 
 /**
- * Unified entry point. Uses the user-provided custom API when `config.enabled`
- * is true AND all required fields are present; otherwise falls back to the
- * built-in z-ai SDK.
+ * Calls the server-side default LLM provider (DeepSeek) using credentials
+ * stored in environment variables. The API key never leaves the server.
  *
- * This is server-only: it relays the user's API key to upstream providers.
+ * Used when the user has NOT configured their own custom API — this gives
+ * a good out-of-box experience (DeepSeek is fast and cheap) without
+ * exposing any keys to the frontend.
+ */
+async function callServerDefault(
+  messages: ChatMessage[],
+  opts: ChatOptions,
+): Promise<ChatResult> {
+  const apiKey = process.env.DEEPSEEK_API_KEY;
+  const baseUrl = (process.env.DEEPSEEK_BASE_URL || "https://api.deepseek.com").replace(/\/+$/, "");
+  const model = process.env.DEEPSEEK_MODEL || "deepseek-chat";
+
+  if (!apiKey) {
+    // No server-side key configured — fall back to z-ai SDK.
+    return callZaiSdk(messages, opts);
+  }
+
+  const url = `${baseUrl}/chat/completions`;
+  const body: Record<string, unknown> = {
+    model,
+    messages,
+    temperature: opts.temperature ?? 0.4,
+    stream: false,
+  };
+  if (typeof opts.maxTokens === "number") {
+    body.max_tokens = opts.maxTokens;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(90_000),
+    });
+  } catch (e) {
+    const msg =
+      e instanceof Error
+        ? e.name === "TimeoutError" || e.name === "AbortError"
+          ? "请求超时（>90s）"
+          : `无法连接到 AI 服务：${e.message}`
+        : "无法连接到 AI 服务";
+    throw new LlmError(msg, { status: 502, upstream: "network" });
+  }
+
+  const contentType = res.headers.get("content-type") || "";
+  if (!contentType.includes("application/json")) {
+    const text = await res.text().catch(() => "");
+    const snippet = text.slice(0, 200).replace(/\s+/g, " ").trim();
+    throw new LlmError(
+      `AI 服务返回了非 JSON 响应（HTTP ${res.status}）${snippet ? `：${snippet}` : ""}`,
+      { status: 502, upstream: "non-json" },
+    );
+  }
+
+  if (!res.ok) {
+    let detail = "";
+    try {
+      const errJson = (await res.json()) as {
+        error?: { message?: string } | string;
+        message?: string;
+      };
+      if (typeof errJson?.error === "string") detail = errJson.error;
+      else if (typeof errJson?.error?.message === "string")
+        detail = errJson.error.message;
+      else if (typeof errJson?.message === "string") detail = errJson.message;
+    } catch {
+      // ignore
+    }
+    const reason =
+      res.status === 401 || res.status === 403
+        ? "API Key 无效或权限不足"
+        : res.status === 429
+          ? "调用过于频繁（限流）"
+          : res.status >= 500
+            ? "上游服务暂时不可用"
+            : "请求被拒绝";
+    throw new LlmError(
+      `AI 服务错误（HTTP ${res.status} · ${reason}）${detail ? `：${detail}` : ""}`,
+      { status: res.status, upstream: "http" },
+    );
+  }
+
+  let json: {
+    choices?: Array<{ message?: { content?: string } }>;
+  };
+  try {
+    json = (await res.json()) as typeof json;
+  } catch (e) {
+    throw new LlmError(
+      `AI 服务响应无法解析为 JSON：${
+        e instanceof Error ? e.message : "未知错误"
+      }`,
+      { status: 502, upstream: "parse" },
+    );
+  }
+
+  const content = json.choices?.[0]?.message?.content ?? "";
+  if (!content) {
+    throw new LlmError("AI 服务返回了空回复", { status: 502 });
+  }
+  return { content };
+}
+
+/**
+ * Unified entry point. Priority:
+ * 1. User-provided custom API (if `config.enabled` and complete)
+ * 2. Server-side default (DeepSeek via env vars) — no user config needed
+ * 3. Built-in z-ai SDK (last resort fallback)
+ *
+ * This is server-only: it relays API keys to upstream providers.
  */
 export async function chat(
   messages: ChatMessage[],
@@ -234,5 +347,5 @@ export async function chat(
   if (config?.enabled) {
     return callOpenAiCompatible(config, messages, opts);
   }
-  return callZaiSdk(messages, opts);
+  return callServerDefault(messages, opts);
 }

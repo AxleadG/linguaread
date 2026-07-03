@@ -128,7 +128,7 @@ function SettingsForm({ initialConfig, onClose }: SettingsFormProps) {
     toast.success("设置已保存", {
       description: draft.enabled
         ? `已启用 ${draft.model}`
-        : "已切换回内置 AI（智谱 GLM）",
+        : "已切换回内置 AI（DeepSeek）",
     });
     onClose();
   };
@@ -155,7 +155,7 @@ function SettingsForm({ initialConfig, onClose }: SettingsFormProps) {
             启用自定义 API
           </div>
           <p className="text-xs text-muted-foreground">
-            关闭时使用内置 AI（智谱 GLM）；开启后使用下方配置
+            关闭时使用内置 AI（DeepSeek）；开启后使用下方配置
           </p>
         </div>
         <Switch
@@ -372,7 +372,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
             AI 模型与朗读设置
           </DialogTitle>
           <DialogDescription>
-            配置 AI 模型（默认智谱 GLM，可填自定义 OpenAI 兼容 API）和朗读音色（推荐 Edge 浏览器，自带微软神经语音）。所有数据仅保存在本地浏览器。
+            配置 AI 模型（默认 DeepSeek，可填自定义 OpenAI 兼容 API）和朗读音色（推荐 Edge 浏览器，自带微软神经语音）。所有数据仅保存在本地浏览器。
           </DialogDescription>
         </DialogHeader>
 
@@ -390,7 +390,7 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
                 : "bg-emerald-100/70 text-emerald-900"
             }
           >
-            当前：{config.enabled ? `自定义 · ${config.model}` : "内置 · 智谱 GLM"}
+            当前：{config.enabled ? `自定义 · ${config.model}` : "内置 · DeepSeek"}
           </Badge>
         </div>
       </DialogContent>
