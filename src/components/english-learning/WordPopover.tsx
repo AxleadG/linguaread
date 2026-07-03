@@ -18,19 +18,16 @@ import { safeFetchJson } from "@/lib/english-learning/safe-fetch";
 
 interface WordPopoverProps {
   word: string;
-  /** Pre-fetched definition, if available (e.g. from the AI vocabulary list). */
   preset?: VocabItem | WordLookupResult | null;
-  /** Surrounding sentence, used as context for on-demand lookup. */
   context?: string;
-  /** Whether the user has saved this word. */
   saved?: boolean;
   onToggleSave?: (item: VocabItem | WordLookupResult) => void;
   onSpeak?: (text: string, key: string) => void;
   speakingKey?: string | null;
-  /** Whether this word is part of the AI-highlighted vocabulary list. */
   highlighted?: boolean;
-  /** Optional custom API config to relay to /api/word. */
+  selected?: boolean;
   apiConfig?: ApiConfig | null;
+  wordIdx?: number | null;
   children?: React.ReactNode;
 }
 
@@ -43,7 +40,9 @@ export function WordPopover({
   onSpeak,
   speakingKey,
   highlighted,
+  selected,
   apiConfig,
+  wordIdx,
   children,
 }: WordPopoverProps) {
   const [open, setOpen] = useState(false);
@@ -85,7 +84,6 @@ export function WordPopover({
     }
   }, [open, lookup]);
 
-  // Reset cache if the preset changes (e.g. new analysis).
   useEffect(() => {
     fetchedRef.current = false;
     setData(preset ?? null);
@@ -93,17 +91,51 @@ export function WordPopover({
 
   const isSpeaking = speakingKey === `word:${word.toLowerCase()}`;
 
+  const mouseDownPosRef = useRef<{ x: number; y: number } | null>(null);
+  const draggedRef = useRef(false);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    mouseDownPosRef.current = { x: e.clientX, y: e.clientY };
+    draggedRef.current = false;
+  };
+
+  const handleMouseUp = (e: React.MouseEvent) => {
+    const down = mouseDownPosRef.current;
+    if (down) {
+      const dx = Math.abs(e.clientX - down.x);
+      const dy = Math.abs(e.clientY - down.y);
+      if (dx > 5 || dy > 5) {
+        draggedRef.current = true;
+      }
+    }
+  };
+
+  const handleClick = (e: React.MouseEvent) => {
+    if (draggedRef.current) {
+      e.preventDefault();
+      e.stopPropagation();
+      draggedRef.current = false;
+      setOpen(false);
+    }
+  };
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <button
           type="button"
+          onMouseDown={handleMouseDown}
+          onMouseUp={handleMouseUp}
+          onClick={handleClick}
+          data-word-idx={wordIdx ?? undefined}
           className={cn(
             "inline-flex items-baseline rounded px-0.5 align-baseline transition-colors",
             "hover:bg-accent/70 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            highlighted
-              ? "border-b-2 border-amber-500/70 font-medium text-foreground decoration-amber-600/40"
-              : "border-b border-dashed border-ring/30 text-foreground",
+            selected
+              ? "bg-primary/20 text-primary ring-1 ring-primary/40"
+              : highlighted
+                ? "border-b-2 border-amber-500/70 font-medium text-foreground decoration-amber-600/40"
+                : "border-b border-dashed border-ring/30 text-foreground",
             isSpeaking && "bg-amber-200/60",
           )}
           title={`Look up "${word}"`}
@@ -111,21 +143,13 @@ export function WordPopover({
           {children ?? word}
         </button>
       </PopoverTrigger>
-      <PopoverContent
-        className="w-72 p-0 text-sm shadow-lg"
-        align="start"
-        sideOffset={6}
-      >
+      <PopoverContent className="w-72 p-0 text-sm shadow-lg" align="start" sideOffset={6}>
         <div className="border-b border-border bg-muted/40 px-3 py-2">
           <div className="flex items-center justify-between gap-2">
             <div className="flex items-baseline gap-2">
-              <span className="text-base font-semibold tracking-tight">
-                {word}
-              </span>
+              <span className="text-base font-semibold tracking-tight">{word}</span>
               {data?.phonetic ? (
-                <span className="font-mono text-xs text-muted-foreground">
-                  {data.phonetic}
-                </span>
+                <span className="font-mono text-xs text-muted-foreground">{data.phonetic}</span>
               ) : null}
             </div>
             <div className="flex items-center gap-1">
@@ -158,9 +182,7 @@ export function WordPopover({
             </div>
           </div>
           {data?.partOfSpeech ? (
-            <div className="mt-0.5 text-xs italic text-muted-foreground">
-              {data.partOfSpeech}
-            </div>
+            <div className="mt-0.5 text-xs italic text-muted-foreground">{data.partOfSpeech}</div>
           ) : null}
         </div>
         <div className="px-3 py-2.5">
@@ -176,7 +198,7 @@ export function WordPopover({
               <div className="text-sm leading-snug">{data.definition}</div>
               {data.example ? (
                 <div className="rounded bg-muted/50 px-2 py-1.5 text-xs italic text-muted-foreground">
-                  “{data.example}”
+                  &ldquo;{data.example}&rdquo;
                 </div>
               ) : null}
             </div>

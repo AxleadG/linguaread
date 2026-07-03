@@ -40,6 +40,20 @@ export interface WordLookupResult {
   example: string;
 }
 
+/** A saved article with its full analysis result. */
+export interface ArticleHistoryEntry {
+  id: string;
+  title: string; // first ~60 chars of the English text
+  text: string; // the analyzed English text
+  result: AnalysisResult;
+  timestamp: number;
+}
+
+/** Result from the phrase-translation endpoint. */
+export interface PhraseTranslationResult {
+  translation: string;
+}
+
 /**
  * User-provided custom LLM API configuration.
  * Stored in browser localStorage; sent to the Next.js API route in the

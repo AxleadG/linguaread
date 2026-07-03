@@ -15,6 +15,7 @@ import {
   FileText,
   AlertCircle,
   Settings2,
+  History,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -25,14 +26,17 @@ import { ReadingMode } from "@/components/english-learning/ReadingMode";
 import { TranslationView } from "@/components/english-learning/TranslationView";
 import { VocabularyList } from "@/components/english-learning/VocabularyList";
 import { QuizView } from "@/components/english-learning/QuizView";
+import { QuizContainer } from "@/components/english-learning/QuizContainer";
 import { SummaryView } from "@/components/english-learning/SummaryView";
 import { SavedVocabDrawer } from "@/components/english-learning/SavedVocabDrawer";
 import { SettingsDialog } from "@/components/english-learning/SettingsDialog";
+import { ArticleHistoryDrawer } from "@/components/english-learning/ArticleHistoryDrawer";
 import { SAMPLE_TEXTS } from "@/lib/english-learning/samples";
 import { useSavedVocab } from "@/lib/english-learning/useSavedVocab";
 import { useApiConfig } from "@/lib/english-learning/useApiConfig";
+import { useArticleHistory } from "@/lib/english-learning/useArticleHistory";
 import { safeFetchJson } from "@/lib/english-learning/safe-fetch";
-import type { AnalysisResult, VocabItem } from "@/lib/english-learning/types";
+import type { AnalysisResult, ArticleHistoryEntry, VocabItem } from "@/lib/english-learning/types";
 
 const MAX_CHARS = 8000;
 const MIN_CHARS = 20;
@@ -46,9 +50,11 @@ export default function Home() {
   const [analyzedText, setAnalyzedText] = useState<string>("");
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
 
   const savedVocab = useSavedVocab();
   const { config: apiConfig } = useApiConfig();
+  const articleHistory = useArticleHistory();
 
   const savedWords = useMemo(() => {
     return new Set(savedVocab.saved.map((v) => v.word.toLowerCase()));
@@ -75,6 +81,7 @@ export default function Home() {
       const r = result.data;
       setResult(r);
       setAnalyzedText(trimmed);
+      articleHistory.addArticle(trimmed, r);
       toast.success("分析完成", {
         description: `难度 ${r.difficulty} · ${r.vocabulary.length} 个生词 · ${r.questions.length} 道测验`,
       });
@@ -98,6 +105,15 @@ export default function Home() {
     setResult(null);
     setError(null);
     setAnalyzedText("");
+  }, []);
+
+  const handleLoadFromHistory = useCallback((entry: ArticleHistoryEntry) => {
+    setText(entry.text);
+    setResult(entry.result);
+    setAnalyzedText(entry.text);
+    setError(null);
+    setHistoryOpen(false);
+    toast.success("已加载历史文章", { description: entry.title });
   }, []);
 
   const handleToggleSave = useCallback(
@@ -139,6 +155,24 @@ export default function Home() {
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              className="gap-2"
+              onClick={() => setHistoryOpen(true)}
+              title="学习历史"
+            >
+              <History className="h-4 w-4" />
+              <span className="hidden sm:inline">历史</span>
+              {articleHistory.entries.length > 0 ? (
+                <Badge
+                  variant="secondary"
+                  className="ml-0.5 h-5 min-w-5 justify-center bg-primary/10 px-1.5 text-[11px] text-primary"
+                >
+                  {articleHistory.entries.length}
+                </Badge>
+              ) : null}
+            </Button>
             <Button
               variant="outline"
               size="sm"
@@ -446,7 +480,12 @@ export default function Home() {
               </TabsContent>
 
               <TabsContent value="quiz" className="mt-4">
-                <QuizView key={analyzedText} questions={result.questions} />
+                <QuizContainer
+                  articleKey={analyzedText}
+                  questions={result.questions}
+                  articleVocab={result.vocabulary}
+                  savedVocab={savedVocab.saved}
+                />
               </TabsContent>
             </Tabs>
           </section>
@@ -475,6 +514,16 @@ export default function Home() {
         items={savedVocab.saved}
         onRemove={savedVocab.remove}
         onClear={savedVocab.clear}
+      />
+
+      <ArticleHistoryDrawer
+        open={historyOpen}
+        onOpenChange={setHistoryOpen}
+        entries={articleHistory.entries}
+        currentText={analyzedText}
+        onLoad={handleLoadFromHistory}
+        onRemove={articleHistory.removeArticle}
+        onClear={articleHistory.clearAll}
       />
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
