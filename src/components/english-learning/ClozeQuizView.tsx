@@ -24,6 +24,7 @@ import type { VocabItem } from "@/lib/english-learning/types";
 interface ClozeQuizViewProps {
   articleVocab: VocabItem[];
   savedVocab: VocabItem[];
+  apiConfig?: import("@/lib/english-learning/types").ApiConfig | null;
 }
 
 interface ClozeQuestion {
@@ -31,6 +32,7 @@ interface ClozeQuestion {
   sentenceBefore: string;
   sentenceAfter: string;
   fullSentence: string;
+  chineseTranslation: string; // full-sentence Chinese translation
 }
 
 type QuizMode = "cloze" | "typing";
@@ -54,14 +56,18 @@ function buildClozeQuestions(pool: VocabItem[], count: number): ClozeQuestion[] 
       sentenceBefore: word.example.slice(0, idx),
       sentenceAfter: word.example.slice(idx + word.word.length),
       fullSentence: word.example,
+      chineseTranslation: "", // fetched lazily by TypingMode
     };
   });
 }
 
 // ─────────────────────────────────────────────────────────────
-// Typing mode: 汉译英 (Chinese → English translation typing)
-// Shows the Chinese translation, user types the English sentence.
-// Word-level comparison with character-level visual feedback.
+// Typing mode: 汉译英 with per-word input boxes (句乐部 style)
+//
+// Shows the full Chinese sentence. Below it, a row of colored input
+// boxes — one per English word in the target sentence. The user types
+// each word; pressing space auto-advances to the next box. Each box
+// shows real-time green/red feedback. Press Enter to submit.
 // ─────────────────────────────────────────────────────────────
 
 /** Normalize a word for comparison: lowercase, strip punctuation. */
@@ -69,30 +75,55 @@ function normalizeWord(w: string): string {
   return w.toLowerCase().replace(/[.,!?;:"'`()]/g, "");
 }
 
-/** Split a sentence into "word" tokens (ignoring pure whitespace/punct). */
+/**
+ * Split a sentence into tokens: words + non-words (spaces, punctuation).
+ * Returns array of { value, isWord }.
+ */
+function splitTokens(sentence: string): { value: string; isWord: boolean }[] {
+  const tokens: { value: string; isWord: boolean }[] = [];
+  const re = /([A-Za-z][A-Za-z''-]*)/g;
+  let last = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(sentence)) !== null) {
+    if (m.index > last) {
+      tokens.push({ value: sentence.slice(last, m.index), isWord: false });
+    }
+    tokens.push({ value: m[0], isWord: true });
+    last = m.index + m[0].length;
+  }
+  if (last < sentence.length) {
+    tokens.push({ value: sentence.slice(last), isWord: false });
+  }
+  return tokens;
+}
+
+/** Extract only the word tokens from a sentence. */
 function splitWords(sentence: string): string[] {
-  return (sentence.match(/[A-Za-z''-]+/g) ?? []).filter(Boolean);
+  return splitTokens(sentence)
+    .filter((t) => t.isWord)
+    .map((t) => t.value);
 }
 
 interface WordComparison {
   target: string;
-  typed: string | null;
+  typed: string;
   correct: boolean;
 }
 
-function TypingMode({ questions }: { questions: ClozeQuestion[] }) {
+function TypingMode({ questions, apiConfig }: { questions: ClozeQuestion[]; apiConfig?: import("@/lib/english-learning/types").ApiConfig | null }) {
   const [currentIdx, setCurrentIdx] = useState(0);
-  const [input, setInput] = useState("");
   const [completed, setCompleted] = useState<boolean[]>([]);
   const [startTime, setStartTime] = useState<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
   const [combo, setCombo] = useState(0);
   const [submitted, setSubmitted] = useState(false);
-  const inputRef = useRef<HTMLInputElement>(null);
+  // Chinese translations for each question (fetched lazily).
+  const [translations, setTranslations] = useState<Record<number, string>>({});
 
   const current = questions[currentIdx];
   const isLast = currentIdx >= questions.length - 1;
 
+  // Timer
   useEffect(() => {
     if (startTime === null) return;
     const interval = setInterval(() => {
@@ -101,63 +132,48 @@ function TypingMode({ questions }: { questions: ClozeQuestion[] }) {
     return () => clearInterval(interval);
   }, [startTime]);
 
+  // Fetch Chinese translation for the current question if not already fetched.
   useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
-  const targetSentence = current?.fullSentence ?? "";
-  const targetWords = useMemo(() => splitWords(targetSentence), [targetSentence]);
-  const typedWords = useMemo(() => splitWords(input), [input]);
-
-  const comparison: WordComparison[] = useMemo(() => {
-    return targetWords.map((tw, i) => {
-      const twNorm = normalizeWord(tw);
-      const typed = i < typedWords.length ? typedWords[i] : null;
-      const correct = typed !== null && normalizeWord(typed) === twNorm;
-      return { target: tw, typed, correct };
-    });
-  }, [targetWords, typedWords]);
-
-  const isCorrect = useMemo(() => {
-    if (typedWords.length !== targetWords.length) return false;
-    return comparison.every((c) => c.correct);
-  }, [typedWords, targetWords, comparison]);
-
-  const hasInput = typedWords.length > 0;
-
-  const handleSubmit = useCallback(() => {
-    if (!hasInput) return;
-    setSubmitted(true);
-    if (isCorrect) {
-      setCompleted((prev) => [...prev, true]);
-      setCombo((c) => c + 1);
-      if (isLast) {
-        setStartTime(null);
-      } else {
-        setTimeout(() => {
-          setCurrentIdx((i) => i + 1);
-        }, 1500);
+    if (!current || translations[currentIdx]) return;
+    let cancelled = false;
+    (async () => {
+      const res = await fetch("/api/translate-phrase", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          text: current.fullSentence,
+          config: apiConfig,
+        }),
+      });
+      if (cancelled) return;
+      if (res.ok) {
+        const data = (await res.json()) as { translation?: string };
+        if (data.translation) {
+          setTranslations((prev) => ({ ...prev, [currentIdx]: data.translation }));
+        }
       }
-    } else {
-      setCompleted((prev) => [...prev, false]);
-      setCombo(0);
-    }
-  }, [hasInput, isCorrect, isLast]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentIdx, current, translations, apiConfig]);
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Enter") {
-      e.preventDefault();
-      if (submitted && isCorrect && !isLast) {
-        setCurrentIdx((i) => i + 1);
-      } else {
-        handleSubmit();
-      }
-    }
+  if (!current) return null;
+
+  const targetSentence = current.fullSentence;
+  const targetWords = splitWords(targetSentence);
+  const chineseText = translations[currentIdx] || current.word.definition;
+
+  const correctCount = completed.filter(Boolean).length;
+  const progress = ((currentIdx + (submitted && completed.length > currentIdx ? 1 : 0)) / questions.length) * 100;
+  const formatTime = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    const m = Math.floor(s / 60);
+    return `${m}:${String(s % 60).padStart(2, "0")}`;
   };
 
   const handleReset = () => {
     setCurrentIdx(0);
-    setInput("");
     setCompleted([]);
     setCombo(0);
     setSubmitted(false);
@@ -165,20 +181,38 @@ function TypingMode({ questions }: { questions: ClozeQuestion[] }) {
     setElapsed(0);
   };
 
-  if (!current) return null;
-
-  const correctCount = completed.filter(Boolean).length;
-  const progress = ((currentIdx + (submitted && isCorrect ? 1 : 0)) / questions.length) * 100;
-  const formatTime = (ms: number) => {
-    const s = Math.floor(ms / 1000);
-    const m = Math.floor(s / 60);
-    return `${m}:${String(s % 60).padStart(2, "0")}`;
+  const handleNext = () => {
+    if (!isLast) {
+      setCurrentIdx((i) => i + 1);
+      setSubmitted(false);
+    }
   };
 
-  const chineseHint = current.word.definition;
+  const handleSubmit = (isCorrect: boolean) => {
+    setSubmitted(true);
+    setCompleted((prev) => {
+      const next = [...prev];
+      next[currentIdx] = isCorrect;
+      return next;
+    });
+    if (isCorrect) {
+      setCombo((c) => c + 1);
+      if (isLast) {
+        setStartTime(null);
+      } else {
+        setTimeout(() => {
+          setCurrentIdx((i) => i + 1);
+          setSubmitted(false);
+        }, 1500);
+      }
+    } else {
+      setCombo(0);
+    }
+  };
 
   return (
     <div className="space-y-5">
+      {/* Stats bar */}
       <div className="grid grid-cols-4 gap-3">
         <StatCard icon={<Check className="h-4 w-4" />} label="已通过" value={`${correctCount}/${questions.length}`} color="emerald" />
         <StatCard icon={<Flame className="h-4 w-4" />} label="连击" value={`${combo}`} color="amber" />
@@ -186,6 +220,7 @@ function TypingMode({ questions }: { questions: ClozeQuestion[] }) {
         <StatCard icon={<Trophy className="h-4 w-4" />} label="进度" value={`${Math.round(progress)}%`} color="violet" />
       </div>
 
+      {/* Progress bar */}
       <div className="h-2 overflow-hidden rounded-full bg-muted">
         <div
           className="h-full rounded-full bg-gradient-to-r from-emerald-500 to-emerald-400 transition-all duration-500"
@@ -193,31 +228,26 @@ function TypingMode({ questions }: { questions: ClozeQuestion[] }) {
         />
       </div>
 
-      <TypingCard
+      {/* Main card — keyed by currentIdx so it remounts per question */}
+      <WordBoxCard
         key={currentIdx}
         question={current}
-        chineseHint={chineseHint}
+        chineseText={chineseText}
         targetSentence={targetSentence}
         targetWords={targetWords}
-        input={input}
-        setInput={setInput}
-        comparison={comparison}
         submitted={submitted}
-        isCorrect={isCorrect}
         isLast={isLast}
-        onKeyDown={handleKeyDown}
-        inputRef={inputRef}
         onSubmit={handleSubmit}
-        onNext={() => setCurrentIdx((i) => i + 1)}
-        onResetTimer={() => {
+        onNext={handleNext}
+        onMount={() => {
           setStartTime(Date.now());
           setElapsed(0);
-          setInput("");
           setSubmitted(false);
         }}
       />
 
-      {isLast && submitted && isCorrect && completed.length === questions.length ? (
+      {/* Completion screen */}
+      {isLast && submitted && completed[questions.length - 1] ? (
         <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-amber-50 p-6 text-center">
           <Trophy className="mx-auto h-10 w-10 text-amber-500" />
           <h3 className="mt-2 text-lg font-semibold">全部完成！</h3>
@@ -234,49 +264,133 @@ function TypingMode({ questions }: { questions: ClozeQuestion[] }) {
   );
 }
 
-function TypingCard({
+/**
+ * WordBoxCard: the main interactive component.
+ * Shows Chinese sentence + a row of per-word input boxes.
+ */
+function WordBoxCard({
   question,
-  chineseHint,
+  chineseText,
   targetSentence,
   targetWords,
-  input,
-  setInput,
-  comparison,
   submitted,
-  isCorrect,
   isLast,
-  onKeyDown,
-  inputRef,
   onSubmit,
   onNext,
-  onResetTimer,
+  onMount,
 }: {
   question: ClozeQuestion;
-  chineseHint: string;
+  chineseText: string;
   targetSentence: string;
   targetWords: string[];
-  input: string;
-  setInput: (v: string) => void;
-  comparison: WordComparison[];
   submitted: boolean;
-  isCorrect: boolean;
   isLast: boolean;
-  onKeyDown: (e: React.KeyboardEvent) => void;
-  inputRef: React.RefObject<HTMLInputElement | null>;
-  onSubmit: () => void;
+  onSubmit: (isCorrect: boolean) => void;
   onNext: () => void;
-  onResetTimer: () => void;
+  onMount: () => void;
 }) {
+  // One input value per target word.
+  const [inputs, setInputs] = useState<string[]>(() => targetWords.map(() => ""));
+  const [activeIdx, setActiveIdx] = useState(0);
+  const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  // On mount, reset timer and focus first input.
   useEffect(() => {
-    inputRef.current?.focus();
-    onResetTimer();
-  }, []);
+    onMount();
+    inputRefs.current[0]?.focus();
+  }, [onMount]);
+
+  // Compute word-level comparison.
+  const comparison: WordComparison[] = targetWords.map((tw, i) => {
+    const typed = (inputs[i] ?? "").trim();
+    return {
+      target: tw,
+      typed,
+      correct: normalizeWord(typed) === normalizeWord(tw),
+    };
+  });
+
+  const allFilled = inputs.every((v) => v.trim().length > 0);
+  const isCorrect = allFilled && comparison.every((c) => c.correct);
+
+  const handleInputChange = (idx: number, value: string) => {
+    if (submitted) return;
+    // If the user typed a space, split on space and advance.
+    if (value.includes(" ")) {
+      const parts = value.split(/\s+/).filter(Boolean);
+      if (parts.length > 0) {
+        setInputs((prev) => {
+          const next = [...prev];
+          next[idx] = parts[0];
+          // If there's a second part, put it in the next box.
+          if (parts.length > 1 && idx + 1 < targetWords.length) {
+            next[idx + 1] = parts.slice(1).join(" ");
+          }
+          return next;
+        });
+        // Advance to next box
+        if (idx + 1 < targetWords.length) {
+          setActiveIdx(idx + 1);
+          inputRefs.current[idx + 1]?.focus();
+        }
+        return;
+      }
+    }
+    // Normal: just update this box
+    setInputs((prev) => {
+      const next = [...prev];
+      next[idx] = value;
+      return next;
+    });
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent, idx: number) => {
+    if (e.key === "Enter") {
+      e.preventDefault();
+      if (submitted) {
+        if (isCorrect) onNext();
+        return;
+      }
+      if (allFilled) {
+        onSubmit(isCorrect);
+      }
+      return;
+    }
+    if (e.key === " " || e.key === "Spacebar") {
+      e.preventDefault();
+      // If current box has content, advance to next
+      if ((inputs[idx] ?? "").trim() && idx + 1 < targetWords.length) {
+        setActiveIdx(idx + 1);
+        inputRefs.current[idx + 1]?.focus();
+      }
+      return;
+    }
+    if (e.key === "Backspace") {
+      // If current box is empty and not first, go back to previous
+      if (!(inputs[idx] ?? "").trim() && idx > 0) {
+        e.preventDefault();
+        setActiveIdx(idx - 1);
+        inputRefs.current[idx - 1]?.focus();
+      }
+    }
+  };
+
+  // Color palette for the boxes — cycle through pleasing colors
+  const boxColors = [
+    "border-emerald-300 bg-emerald-50/40 focus:border-emerald-500",
+    "border-sky-300 bg-sky-50/40 focus:border-sky-500",
+    "border-violet-300 bg-violet-50/40 focus:border-violet-500",
+    "border-amber-300 bg-amber-50/40 focus:border-amber-500",
+    "border-rose-300 bg-rose-50/40 focus:border-rose-500",
+    "border-teal-300 bg-teal-50/40 focus:border-teal-500",
+  ];
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-card to-muted/30 p-6 shadow-sm sm:p-8">
+      {/* Word info badge */}
       <div className="mb-4 flex flex-wrap items-center gap-2">
         <Badge variant="secondary" className="bg-amber-100/70 text-amber-900">
-          {question.word.partOfSpeech}
+          {question.word.partOfSpeech} {question.word.word}
         </Badge>
         {question.word.phonetic ? (
           <span className="font-mono text-xs text-muted-foreground">{question.word.phonetic}</span>
@@ -284,59 +398,70 @@ function TypingCard({
         <span className="text-xs text-muted-foreground">共 {targetWords.length} 词</span>
       </div>
 
+      {/* Chinese translation (full sentence) */}
       <div className="mb-6 rounded-lg border border-amber-200/50 bg-amber-50/40 p-4">
         <div className="mb-1 text-xs font-medium uppercase tracking-wide text-amber-700/70">
-          中文释义
+          中文翻译
         </div>
-        <p className="text-lg leading-relaxed text-foreground sm:text-xl">{chineseHint}</p>
+        <p className="text-lg leading-relaxed text-foreground sm:text-xl">{chineseText}</p>
       </div>
 
-      <div className="relative">
-        <Input
-          ref={inputRef}
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={onKeyDown}
-          placeholder="用英文打出包含这个单词的句子..."
-          disabled={submitted && isCorrect}
-          className={cn(
-            "h-12 border-2 text-lg",
-            submitted && isCorrect && "border-emerald-500 bg-emerald-50",
-            submitted && !isCorrect && "border-rose-500 bg-rose-50",
-            !submitted && "border-ring/30",
-          )}
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-        />
-        {submitted && isCorrect ? (
-          <div className="absolute right-3 top-1/2 -translate-y-1/2">
-            <Check className="h-6 w-6 text-emerald-500" />
-          </div>
-        ) : null}
-      </div>
+      {/* Word input boxes */}
+      <div className="mb-4">
+        <div className="mb-2 text-xs text-muted-foreground">
+          填入英文单词（空格跳到下一个，回车提交）
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {targetWords.map((tw, i) => {
+            const colorClass = boxColors[i % boxColors.length];
+            const typed = inputs[i] ?? "";
+            const isCorrect = normalizeWord(typed) === normalizeWord(tw);
+            const showFeedback = typed.trim().length > 0;
 
-      {!submitted && input.trim() ? (
-        <div className="mt-3 flex flex-wrap gap-1.5">
-          {comparison.map((c, i) => {
-            if (c.typed === null) return null;
+            // After submit: show green for correct, red for wrong
+            const finalClass = submitted
+              ? isCorrect
+                ? "border-emerald-500 bg-emerald-100 text-emerald-800"
+                : "border-rose-500 bg-rose-100 text-rose-800"
+              : showFeedback
+                ? isCorrect
+                  ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                  : "border-rose-400 bg-rose-50 text-rose-700"
+                : colorClass;
+
             return (
-              <span
+              <input
                 key={i}
+                ref={(el) => {
+                  inputRefs.current[i] = el;
+                }}
+                type="text"
+                value={typed}
+                onChange={(e) => handleInputChange(i, e.target.value)}
+                onKeyDown={(e) => handleKeyDown(e, i)}
+                onFocus={() => setActiveIdx(i)}
+                disabled={submitted}
+                placeholder="·"
                 className={cn(
-                  "rounded-md px-2 py-0.5 text-sm font-medium",
-                  c.correct ? "bg-emerald-100 text-emerald-700" : "bg-rose-100 text-rose-700",
+                  "h-10 rounded-lg border-2 px-2 text-center text-base font-medium transition-colors",
+                  "focus:outline-none focus:ring-2 focus:ring-ring/20",
+                  finalClass,
+                  i === activeIdx && !submitted && "ring-2 ring-ring/30",
                 )}
-              >
-                {c.typed}
-              </span>
+                style={{
+                  width: `${Math.max(48, Math.min(120, tw.length * 12 + 16))}px`,
+                }}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="off"
+                spellCheck={false}
+              />
             );
           })}
         </div>
-      ) : null}
+      </div>
 
+      {/* After submit: show the correct sentence */}
       {submitted ? (
         <div className="mt-4 space-y-3">
           <div className="rounded-lg border border-emerald-200 bg-emerald-50/60 p-3">
@@ -345,35 +470,32 @@ function TypingCard({
             </div>
             <p className="text-base leading-relaxed text-foreground">{targetSentence}</p>
           </div>
-          {input.trim() ? (
-            <div className="rounded-lg border border-border/60 bg-background/60 p-3">
-              <div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground/70">
-                你的答案
-              </div>
-              <p className="flex flex-wrap gap-1 text-base leading-relaxed">
-                {comparison.map((c, i) => {
-                  if (c.typed === null) return null;
-                  return (
-                    <span
-                      key={i}
-                      className={cn(
-                        "rounded px-1",
-                        c.correct ? "text-emerald-600" : "text-rose-500 line-through",
-                      )}
-                    >
-                      {c.typed}
-                    </span>
-                  );
-                })}
-              </p>
+          {!isCorrect ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50/40 p-3 text-sm text-amber-900">
+              {comparison.map((c, i) => {
+                if (c.correct) return null;
+                return (
+                  <span key={i} className="mr-2">
+                    <span className="font-mono text-rose-600 line-through">{c.typed || "（空）"}</span>
+                    {" → "}
+                    <span className="font-mono font-semibold text-emerald-700">{c.target}</span>
+                  </span>
+                );
+              })}
             </div>
           ) : null}
         </div>
       ) : null}
 
+      {/* Actions */}
       <div className="mt-4 flex items-center gap-2">
         {!submitted ? (
-          <Button size="sm" onClick={onSubmit} disabled={!input.trim()} className="gap-1.5">
+          <Button
+            size="sm"
+            onClick={() => onSubmit(isCorrect)}
+            disabled={!allFilled}
+            className="gap-1.5"
+          >
             提交
             <Check className="h-3.5 w-3.5" />
           </Button>
@@ -390,6 +512,11 @@ function TypingCard({
             <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         )}
+        {!submitted && !allFilled ? (
+          <span className="text-xs text-muted-foreground">
+            还差 {targetWords.length - inputs.filter((v) => v.trim()).length} 词
+          </span>
+        ) : null}
       </div>
     </div>
   );
@@ -631,7 +758,7 @@ function StatCard({
 // ─────────────────────────────────────────────────────────────
 // Main component
 // ─────────────────────────────────────────────────────────────
-export function ClozeQuizView({ articleVocab, savedVocab }: ClozeQuizViewProps) {
+export function ClozeQuizView({ articleVocab, savedVocab, apiConfig }: ClozeQuizViewProps) {
   const [mode, setMode] = useState<QuizMode>("cloze");
   const [source, setSource] = useState<"article" | "saved">(() =>
     savedVocab.length >= 4 ? "saved" : "article",
@@ -745,7 +872,7 @@ export function ClozeQuizView({ articleVocab, savedVocab }: ClozeQuizViewProps) 
         {mode === "cloze" ? (
           <>📝 <span className="font-medium">挖词填空</span>：根据释义和上下文，填入正确的单词。不区分大小写。</>
         ) : (
-          <>⌨️ <span className="font-medium">汉译英</span>：看中文释义，用英文打出包含该单词的完整句子。不区分大小写和标点。按 Enter 提交。</>
+          <>⌨️ <span className="font-medium">汉译英</span>：看整句中文翻译，依次在每个彩色框里填入英文单词。空格跳到下一个，回车提交。不区分大小写。</>
         )}
       </div>
 
@@ -754,7 +881,7 @@ export function ClozeQuizView({ articleVocab, savedVocab }: ClozeQuizViewProps) 
         {mode === "cloze" ? (
           <ClozeMode questions={questions} />
         ) : (
-          <TypingMode questions={questions} />
+          <TypingMode questions={questions} apiConfig={apiConfig} />
         )}
       </div>
     </div>

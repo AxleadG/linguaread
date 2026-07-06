@@ -5,13 +5,14 @@ import { HelpCircle, PencilLine } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { QuizView } from "./QuizView";
 import { ClozeQuizView } from "./ClozeQuizView";
-import type { QuizQuestion, VocabItem } from "@/lib/english-learning/types";
+import type { ApiConfig, QuizQuestion, VocabItem } from "@/lib/english-learning/types";
 
 interface QuizContainerProps {
   questions: QuizQuestion[];
   articleVocab: VocabItem[];
   savedVocab: VocabItem[];
   articleKey: string;
+  apiConfig?: ApiConfig | null;
 }
 
 type QuizMode = "comprehension" | "cloze";
@@ -21,6 +22,7 @@ export function QuizContainer({
   articleVocab,
   savedVocab,
   articleKey,
+  apiConfig,
 }: QuizContainerProps) {
   const [mode, setMode] = useState<QuizMode>("comprehension");
 
@@ -64,6 +66,7 @@ export function QuizContainer({
           key={`${articleKey}-cloze`}
           articleVocab={articleVocab}
           savedVocab={savedVocab}
+          apiConfig={apiConfig}
         />
       )}
     </div>

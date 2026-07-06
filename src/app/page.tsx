@@ -485,6 +485,7 @@ export default function Home() {
                   questions={result.questions}
                   articleVocab={result.vocabulary}
                   savedVocab={savedVocab.saved}
+                  apiConfig={apiConfig}
                 />
               </TabsContent>
             </Tabs>
