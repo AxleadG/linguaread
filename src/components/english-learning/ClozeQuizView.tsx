@@ -315,63 +315,89 @@ function WordBoxCard({
 
   const handleInputChange = (idx: number, value: string) => {
     if (submitted) return;
-    // If the user typed a space, split on space and advance.
-    if (value.includes(" ")) {
-      const parts = value.split(/\s+/).filter(Boolean);
-      if (parts.length > 0) {
-        setInputs((prev) => {
-          const next = [...prev];
-          next[idx] = parts[0];
-          // If there's a second part, put it in the next box.
-          if (parts.length > 1 && idx + 1 < targetWords.length) {
-            next[idx + 1] = parts.slice(1).join(" ");
-          }
-          return next;
-        });
-        // Advance to next box
-        if (idx + 1 < targetWords.length) {
-          setActiveIdx(idx + 1);
-          inputRefs.current[idx + 1]?.focus();
-        }
-        return;
-      }
-    }
-    // Normal: just update this box
+    // Strip any spaces the user might paste in — we handle space via keydown.
+    const cleaned = value.replace(/\s+/g, "");
     setInputs((prev) => {
       const next = [...prev];
-      next[idx] = value;
+      next[idx] = cleaned;
       return next;
     });
   };
 
+  const focusBox = (idx: number) => {
+    if (idx < 0 || idx >= targetWords.length) return;
+    setActiveIdx(idx);
+    // Use setTimeout to ensure focus happens after React re-render.
+    setTimeout(() => {
+      const el = inputRefs.current[idx];
+      if (el) {
+        el.focus();
+        // Move cursor to end of any existing text.
+        const len = el.value.length;
+        el.setSelectionRange(len, len);
+      }
+    }, 0);
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent, idx: number) => {
+    if (submitted) {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        if (isCorrect) onNext();
+      }
+      return;
+    }
+
     if (e.key === "Enter") {
       e.preventDefault();
-      if (submitted) {
-        if (isCorrect) onNext();
-        return;
-      }
       if (allFilled) {
         onSubmit(isCorrect);
       }
       return;
     }
-    if (e.key === " " || e.key === "Spacebar") {
-      e.preventDefault();
-      // If current box has content, advance to next
-      if ((inputs[idx] ?? "").trim() && idx + 1 < targetWords.length) {
-        setActiveIdx(idx + 1);
-        inputRefs.current[idx + 1]?.focus();
+
+    // Space or Tab → advance to next box (only if current has content)
+    if (e.key === " " || e.key === "Spacebar" || e.key === "Tab") {
+      // For Tab, don't preventDefault if it's a plain Tab (let browser handle)
+      // unless we want to force sequential filling. Let's intercept Space only.
+      if (e.key !== "Tab") {
+        e.preventDefault();
+      }
+      // Always advance on space, regardless of content (so user can skip ahead)
+      if (idx + 1 < targetWords.length) {
+        focusBox(idx + 1);
       }
       return;
     }
-    if (e.key === "Backspace") {
-      // If current box is empty and not first, go back to previous
-      if (!(inputs[idx] ?? "").trim() && idx > 0) {
+
+    // Arrow Right at end of text → next box
+    if (e.key === "ArrowRight") {
+      const el = e.currentTarget as HTMLInputElement;
+      if (el.selectionStart === el.value.length && idx + 1 < targetWords.length) {
         e.preventDefault();
-        setActiveIdx(idx - 1);
-        inputRefs.current[idx - 1]?.focus();
+        focusBox(idx + 1);
       }
+      return;
+    }
+
+    // Arrow Left at start of text → previous box
+    if (e.key === "ArrowLeft") {
+      const el = e.currentTarget as HTMLInputElement;
+      if (el.selectionStart === 0 && idx > 0) {
+        e.preventDefault();
+        focusBox(idx - 1);
+      }
+      return;
+    }
+
+    // Backspace on empty box → go to previous box
+    if (e.key === "Backspace") {
+      const el = e.currentTarget as HTMLInputElement;
+      if (el.value === "" && idx > 0) {
+        e.preventDefault();
+        focusBox(idx - 1);
+      }
+      return;
     }
   };
 
