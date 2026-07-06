@@ -315,7 +315,7 @@ function WordBoxCard({
 
   const handleInputChange = (idx: number, value: string) => {
     if (submitted) return;
-    // Strip any spaces the user might paste in — we handle space via keydown.
+    // Strip any spaces the user might paste/type — spaces are handled in keydown.
     const cleaned = value.replace(/\s+/g, "");
     setInputs((prev) => {
       const next = [...prev];
@@ -324,30 +324,31 @@ function WordBoxCard({
     });
   };
 
+  /** Synchronously focus a box by index. No setTimeout — React's controlled
+   *  input keeps focus stable as long as we don't unmount the element. */
   const focusBox = (idx: number) => {
     if (idx < 0 || idx >= targetWords.length) return;
+    const el = inputRefs.current[idx];
+    if (el) {
+      el.focus();
+      // Move cursor to end of any existing text.
+      const len = el.value.length;
+      el.setSelectionRange(len, len);
+    }
     setActiveIdx(idx);
-    // Use setTimeout to ensure focus happens after React re-render.
-    setTimeout(() => {
-      const el = inputRefs.current[idx];
-      if (el) {
-        el.focus();
-        // Move cursor to end of any existing text.
-        const len = el.value.length;
-        el.setSelectionRange(len, len);
-      }
-    }, 0);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, idx: number) => {
+    // After submit, only Enter (to advance if correct) is handled.
     if (submitted) {
-      if (e.key === "Enter") {
+      if (e.key === "Enter" && isCorrect) {
         e.preventDefault();
-        if (isCorrect) onNext();
+        onNext();
       }
       return;
     }
 
+    // Enter → submit (if all filled)
     if (e.key === "Enter") {
       e.preventDefault();
       if (allFilled) {
@@ -356,19 +357,21 @@ function WordBoxCard({
       return;
     }
 
-    // Space or Tab → advance to next box (only if current has content)
-    if (e.key === " " || e.key === "Spacebar" || e.key === "Tab") {
-      // For Tab, don't preventDefault if it's a plain Tab (let browser handle)
-      // unless we want to force sequential filling. Let's intercept Space only.
-      if (e.key !== "Tab") {
-        e.preventDefault();
-      }
-      // Always advance on space, regardless of content (so user can skip ahead)
+    // Space → advance to next box (ALWAYS, even if current is empty, so user
+    // can skip ahead). preventDefault stops the space from being typed.
+    if (e.key === " ") {
+      e.preventDefault();
       if (idx + 1 < targetWords.length) {
         focusBox(idx + 1);
       }
       return;
     }
+
+    // Tab → let browser handle natively (moves to next focusable element,
+    // which is the next input box since they're in DOM order). Do NOT
+    // preventDefault — this is the user's escape hatch if anything goes
+    // wrong with our space handling.
+    // (No handler needed — just don't intercept Tab.)
 
     // Arrow Right at end of text → next box
     if (e.key === "ArrowRight") {
