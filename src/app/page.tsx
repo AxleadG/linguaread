@@ -40,7 +40,7 @@ import type { AnalysisResult, ArticleHistoryEntry, VocabItem } from "@/lib/engli
 
 const MAX_CHARS = 8000;
 const MIN_CHARS = 20;
-const APP_VERSION = "1.0.0";
+const APP_VERSION = "1.1.0";
 
 export default function Home() {
   const [text, setText] = useState("");
