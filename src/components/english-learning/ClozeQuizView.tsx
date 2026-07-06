@@ -291,14 +291,15 @@ function WordBoxCard({
 }) {
   // One input value per target word.
   const [inputs, setInputs] = useState<string[]>(() => targetWords.map(() => ""));
-  const [activeIdx, setActiveIdx] = useState(0);
+  const [hintIdx, setHintIdx] = useState<number | null>(null);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // On mount, reset timer and focus first input.
+  // Empty dep array — only run once on mount.
   useEffect(() => {
     onMount();
     inputRefs.current[0]?.focus();
-  }, [onMount]);
+  }, []);
 
   // Compute word-level comparison.
   const comparison: WordComparison[] = targetWords.map((tw, i) => {
@@ -315,7 +316,7 @@ function WordBoxCard({
 
   const handleInputChange = (idx: number, value: string) => {
     if (submitted) return;
-    // Strip any spaces the user might paste/type — spaces are handled in keydown.
+    // Strip any spaces — spaces are handled in keydown, not by typing.
     const cleaned = value.replace(/\s+/g, "");
     setInputs((prev) => {
       const next = [...prev];
@@ -324,18 +325,16 @@ function WordBoxCard({
     });
   };
 
-  /** Synchronously focus a box by index. No setTimeout — React's controlled
-   *  input keeps focus stable as long as we don't unmount the element. */
+  /** Focus a box by index. Uses requestAnimationFrame to ensure the focus
+   *  call happens after any pending React state updates settle. */
   const focusBox = (idx: number) => {
     if (idx < 0 || idx >= targetWords.length) return;
     const el = inputRefs.current[idx];
     if (el) {
       el.focus();
-      // Move cursor to end of any existing text.
       const len = el.value.length;
       el.setSelectionRange(len, len);
     }
-    setActiveIdx(idx);
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, idx: number) => {
@@ -357,8 +356,8 @@ function WordBoxCard({
       return;
     }
 
-    // Space → advance to next box (ALWAYS, even if current is empty, so user
-    // can skip ahead). preventDefault stops the space from being typed.
+    // Space → advance to next box. preventDefault stops the space from
+    // being typed into the input.
     if (e.key === " ") {
       e.preventDefault();
       if (idx + 1 < targetWords.length) {
@@ -366,12 +365,6 @@ function WordBoxCard({
       }
       return;
     }
-
-    // Tab → let browser handle natively (moves to next focusable element,
-    // which is the next input box since they're in DOM order). Do NOT
-    // preventDefault — this is the user's escape hatch if anything goes
-    // wrong with our space handling.
-    // (No handler needed — just don't intercept Tab.)
 
     // Arrow Right at end of text → next box
     if (e.key === "ArrowRight") {
@@ -468,14 +461,12 @@ function WordBoxCard({
                 value={typed}
                 onChange={(e) => handleInputChange(i, e.target.value)}
                 onKeyDown={(e) => handleKeyDown(e, i)}
-                onFocus={() => setActiveIdx(i)}
                 disabled={submitted}
                 placeholder="·"
                 className={cn(
                   "h-10 rounded-lg border-2 px-2 text-center text-base font-medium transition-colors",
-                  "focus:outline-none focus:ring-2 focus:ring-ring/20",
+                  "focus:outline-none focus:ring-2 focus:ring-ring/40 focus:border-primary",
                   finalClass,
-                  i === activeIdx && !submitted && "ring-2 ring-ring/30",
                 )}
                 style={{
                   width: `${Math.max(48, Math.min(120, tw.length * 12 + 16))}px`,
@@ -517,17 +508,43 @@ function WordBoxCard({
       ) : null}
 
       {/* Actions */}
-      <div className="mt-4 flex items-center gap-2">
+      <div className="mt-4 flex flex-wrap items-center gap-2">
         {!submitted ? (
-          <Button
-            size="sm"
-            onClick={() => onSubmit(isCorrect)}
-            disabled={!allFilled}
-            className="gap-1.5"
-          >
-            提交
-            <Check className="h-3.5 w-3.5" />
-          </Button>
+          <>
+            <Button
+              size="sm"
+              onClick={() => onSubmit(isCorrect)}
+              disabled={!allFilled}
+              className="gap-1.5"
+            >
+              提交
+              <Check className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={() => {
+                // Find the first empty box (or the focused box if all filled)
+                const focusedIdx = inputRefs.current.findIndex(
+                  (el) => el === document.activeElement,
+                );
+                const emptyIdx = inputs.findIndex((v) => !v.trim());
+                const idx = focusedIdx >= 0 ? focusedIdx : (emptyIdx >= 0 ? emptyIdx : 0);
+                setHintIdx(idx);
+                // Focus that box so the user can type the answer
+                focusBox(idx);
+              }}
+            >
+              <Lightbulb className="h-3.5 w-3.5" />
+              提示当前词
+            </Button>
+            {!allFilled ? (
+              <span className="text-xs text-muted-foreground">
+                还差 {targetWords.length - inputs.filter((v) => v.trim()).length} 词
+              </span>
+            ) : null}
+          </>
         ) : isCorrect ? (
           !isLast ? (
             <Button size="sm" onClick={onNext} className="gap-1.5">
@@ -541,12 +558,25 @@ function WordBoxCard({
             <ArrowRight className="h-3.5 w-3.5" />
           </Button>
         )}
-        {!submitted && !allFilled ? (
-          <span className="text-xs text-muted-foreground">
-            还差 {targetWords.length - inputs.filter((v) => v.trim()).length} 词
-          </span>
-        ) : null}
       </div>
+
+      {/* Hint display: shows the English word for the hinted box */}
+      {hintIdx !== null && !submitted ? (
+        <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+          <Lightbulb className="h-4 w-4 shrink-0" />
+          <span>
+            第 {hintIdx + 1} 个词：
+            <span className="font-mono font-semibold text-emerald-700">{targetWords[hintIdx]}</span>
+            <button
+              type="button"
+              className="ml-2 text-xs text-amber-600 hover:underline"
+              onClick={() => setHintIdx(null)}
+            >
+              收起
+            </button>
+          </span>
+        </div>
+      ) : null}
     </div>
   );
 }
