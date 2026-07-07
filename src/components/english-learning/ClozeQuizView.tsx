@@ -292,6 +292,8 @@ function WordBoxCard({
   // One input value per target word.
   const [inputs, setInputs] = useState<string[]>(() => targetWords.map(() => ""));
   const [hintIdx, setHintIdx] = useState<number | null>(null);
+  // Hint level: 0 = none, 1 = English definition, 2 = Chinese definition, 3 = answer
+  const [hintLevel, setHintLevel] = useState(0);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   // On mount, reset timer and focus first input.
@@ -525,19 +527,23 @@ function WordBoxCard({
               variant="outline"
               className="gap-1.5"
               onClick={() => {
-                // Find the first empty box (or the focused box if all filled)
+                // Always hint the currently focused box, regardless of content.
                 const focusedIdx = inputRefs.current.findIndex(
                   (el) => el === document.activeElement,
                 );
-                const emptyIdx = inputs.findIndex((v) => !v.trim());
-                const idx = focusedIdx >= 0 ? focusedIdx : (emptyIdx >= 0 ? emptyIdx : 0);
-                setHintIdx(idx);
-                // Focus that box so the user can type the answer
+                const idx = focusedIdx >= 0 ? focusedIdx : 0;
+                // Cycle hint level: 0→1→2→3→0
+                if (hintIdx === idx) {
+                  setHintLevel((prev) => (prev >= 3 ? 0 : prev + 1));
+                } else {
+                  setHintIdx(idx);
+                  setHintLevel(1);
+                }
                 focusBox(idx);
               }}
             >
               <Lightbulb className="h-3.5 w-3.5" />
-              提示当前词
+              提示当前词{hintIdx !== null && hintLevel > 0 ? ` (${hintLevel}/3)` : ""}
             </Button>
             {!allFilled ? (
               <span className="text-xs text-muted-foreground">
@@ -560,21 +566,44 @@ function WordBoxCard({
         )}
       </div>
 
-      {/* Hint display: shows the English word for the hinted box */}
-      {hintIdx !== null && !submitted ? (
-        <div className="mt-3 flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-          <Lightbulb className="h-4 w-4 shrink-0" />
-          <span>
-            第 {hintIdx + 1} 个词：
-            <span className="font-mono font-semibold text-emerald-700">{targetWords[hintIdx]}</span>
+      {/* Hint display: 3 levels — word info → Chinese def → answer */}
+      {hintIdx !== null && hintLevel > 0 && !submitted ? (
+        <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
+          <Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="flex-1">
+            <div className="text-xs text-amber-600">
+              第 {hintIdx + 1} 个词 · 提示 {hintLevel}/3
+            </div>
+            <div className="mt-0.5">
+              {hintLevel === 1 ? (
+                <span className="text-amber-900">
+                  {question.word.partOfSpeech ? `${question.word.partOfSpeech} ` : ""}
+                  {question.word.phonetic ? (
+                    <span className="font-mono">{question.word.phonetic}</span>
+                  ) : ""}
+                  <span className="ml-2 text-xs text-amber-600">（词性 + 音标）</span>
+                </span>
+              ) : hintLevel === 2 ? (
+                <span className="text-amber-900">
+                  中文释义：<span className="font-medium">{question.word.definition}</span>
+                </span>
+              ) : (
+                <span className="text-amber-900">
+                  答案：<span className="font-mono font-bold text-emerald-700">{targetWords[hintIdx]}</span>
+                </span>
+              )}
+            </div>
             <button
               type="button"
-              className="ml-2 text-xs text-amber-600 hover:underline"
-              onClick={() => setHintIdx(null)}
+              className="mt-1 text-xs text-amber-600 hover:underline"
+              onClick={() => {
+                setHintIdx(null);
+                setHintLevel(0);
+              }}
             >
               收起
             </button>
-          </span>
+          </div>
         </div>
       ) : null}
     </div>
@@ -588,7 +617,6 @@ function ClozeMode({ questions }: { questions: ClozeQuestion[] }) {
   const [answers, setAnswers] = useState<string[]>(() => questions.map(() => ""));
   const [submitted, setSubmitted] = useState(false);
   const [revealed, setRevealed] = useState<Set<number>>(new Set());
-  const [currentIdx, setCurrentIdx] = useState(0);
 
   // Reset when questions change
   const [lastKey, setLastKey] = useState("");
@@ -598,7 +626,6 @@ function ClozeMode({ questions }: { questions: ClozeQuestion[] }) {
     setAnswers(questions.map(() => ""));
     setSubmitted(false);
     setRevealed(new Set());
-    setCurrentIdx(0);
   }
 
   const handleAnswerChange = (idx: number, value: string) => {
@@ -618,29 +645,27 @@ function ClozeMode({ questions }: { questions: ClozeQuestion[] }) {
     setAnswers(questions.map(() => ""));
     setSubmitted(false);
     setRevealed(new Set());
-    setCurrentIdx(0);
   };
 
   const allAnswered = answers.every((a) => a.trim().length > 0);
   const correctCount = submitted
     ? answers.filter((a, i) => normalize(a) === normalize(questions[i].word.word)).length
     : 0;
-  const progress = ((currentIdx + 1) / questions.length) * 100;
-
-  const current = questions[currentIdx];
+  const answeredCount = answers.filter((a) => a.trim()).length;
+  const progress = (answeredCount / questions.length) * 100;
 
   return (
     <div className="space-y-5">
       {/* Stats bar */}
       <div className="grid grid-cols-3 gap-3">
-        <StatCard icon={<Check className="h-4 w-4" />} label="当前" value={`${currentIdx + 1}/${questions.length}`} color="emerald" />
+        <StatCard icon={<Check className="h-4 w-4" />} label="已答" value={`${answeredCount}/${questions.length}`} color="emerald" />
         <StatCard
           icon={<Trophy className="h-4 w-4" />}
           label={submitted ? "得分" : "进度"}
           value={submitted ? `${correctCount}/${questions.length}` : `${Math.round(progress)}%`}
           color="violet"
         />
-        <StatCard icon={<Flame className="h-4 w-4" />} label="已答" value={`${answers.filter((a) => a.trim()).length}`} color="amber" />
+        <StatCard icon={<Flame className="h-4 w-4" />} label="剩余" value={`${questions.length - answeredCount}`} color="amber" />
       </div>
 
       {/* Progress bar */}
@@ -651,134 +676,138 @@ function ClozeMode({ questions }: { questions: ClozeQuestion[] }) {
         />
       </div>
 
-      {/* Current question card (one at a time, like 句乐部) */}
-      {current ? (
-        <div className="relative overflow-hidden rounded-2xl border border-border/60 bg-gradient-to-br from-card to-muted/30 p-6 shadow-sm sm:p-8">
-          <div className="mb-4 flex flex-wrap items-center gap-2">
-            <Badge variant="secondary" className="bg-amber-100/70 text-amber-900">
-              {current.word.partOfSpeech}
-            </Badge>
-            <span className="text-sm text-muted-foreground">
-              释义：<span className="font-medium text-foreground">{current.word.definition}</span>
-            </span>
-            {current.word.phonetic ? (
-              <span className="font-mono text-xs text-muted-foreground">{current.word.phonetic}</span>
-            ) : null}
-          </div>
-
-          <p className="mb-6 text-xl leading-relaxed sm:text-2xl sm:leading-relaxed">
-            {current.sentenceBefore}
-            <span className="inline-flex items-baseline align-baseline">
-              <Input
-                type="text"
-                value={answers[currentIdx] ?? ""}
-                onChange={(e) => handleAnswerChange(currentIdx, e.target.value)}
-                disabled={submitted}
-                placeholder="_____"
-                className={cn(
-                  "mx-1 inline-block h-9 w-32 border-2 border-dashed px-2 text-center text-lg",
-                  submitted && normalize(answers[currentIdx] ?? "") === normalize(current.word.word) && "border-emerald-500 bg-emerald-50 text-emerald-900",
-                  submitted && normalize(answers[currentIdx] ?? "") !== normalize(current.word.word) && "border-rose-500 bg-rose-50 text-rose-900",
-                  !submitted && "border-ring/40",
-                )}
-                autoComplete="off"
-                spellCheck={false}
-              />
-            </span>
-            {current.sentenceAfter}
-          </p>
-
-          {/* Feedback */}
-          {submitted ? (
-            <div className={cn(
-              "flex items-center gap-2 rounded-lg border px-4 py-3 text-sm",
-              normalize(answers[currentIdx] ?? "") === normalize(current.word.word)
-                ? "border-emerald-200 bg-emerald-50/80 text-emerald-900"
-                : "border-rose-200 bg-rose-50/80 text-rose-900",
-            )}>
-              {normalize(answers[currentIdx] ?? "") === normalize(current.word.word) ? (
-                <Check className="h-5 w-5 shrink-0" />
-              ) : (
-                <X className="h-5 w-5 shrink-0" />
+      {/* All questions at once */}
+      <div className="space-y-3">
+        {questions.map((q, qIdx) => {
+          const isCorrect = submitted && normalize(answers[qIdx] ?? "") === normalize(q.word.word);
+          const isWrong = submitted && !isCorrect;
+          return (
+            <div
+              key={qIdx}
+              className={cn(
+                "rounded-xl border bg-card p-4 sm:p-5",
+                submitted && isCorrect && "border-emerald-400/60",
+                submitted && isWrong && "border-rose-400/60",
+                !submitted && "border-border/60",
               )}
-              <span className="flex-1">
-                {normalize(answers[currentIdx] ?? "") === normalize(current.word.word) ? (
-                  <>正确！</>
-                ) : (
-                  <>
-                    正确答案：<span className="font-semibold">{current.word.word}</span>
-                    {(answers[currentIdx] ?? "").trim() && (
-                      <span className="ml-2 opacity-70">（你的答案：{answers[currentIdx]}）</span>
+            >
+              {/* Word info */}
+              <div className="mb-2 flex flex-wrap items-center gap-2">
+                <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary/10 text-xs font-semibold text-primary">
+                  {qIdx + 1}
+                </span>
+                <Badge variant="secondary" className="bg-amber-100/70 text-[10px] text-amber-900">
+                  {q.word.partOfSpeech}
+                </Badge>
+                <span className="text-[11px] text-muted-foreground">
+                  释义：{q.word.definition}
+                </span>
+                {q.word.phonetic ? (
+                  <span className="font-mono text-[10px] text-muted-foreground">{q.word.phonetic}</span>
+                ) : null}
+              </div>
+
+              {/* Sentence with blank */}
+              <p className="text-[15px] leading-7 text-foreground sm:text-base sm:leading-8">
+                {q.sentenceBefore}
+                <span className="inline-flex items-baseline align-baseline">
+                  <Input
+                    type="text"
+                    value={answers[qIdx] ?? ""}
+                    onChange={(e) => handleAnswerChange(qIdx, e.target.value)}
+                    disabled={submitted}
+                    placeholder="_____"
+                    className={cn(
+                      "mx-1 inline-block h-8 w-28 border-2 border-dashed px-2 text-center text-base",
+                      submitted && isCorrect && "border-emerald-500 bg-emerald-50 text-emerald-900",
+                      submitted && isWrong && "border-rose-500 bg-rose-50 text-rose-900",
+                      !submitted && "border-ring/40",
                     )}
-                  </>
-                )}
+                    autoComplete="off"
+                    spellCheck={false}
+                  />
+                </span>
+                {q.sentenceAfter}
+              </p>
+
+              {/* Per-question feedback */}
+              {submitted ? (
+                <div className={cn(
+                  "mt-2 flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs",
+                  isCorrect ? "border-emerald-200 bg-emerald-50/80 text-emerald-900" : "border-rose-200 bg-rose-50/80 text-rose-900",
+                )}>
+                  {isCorrect ? <Check className="h-3.5 w-3.5 shrink-0" /> : <X className="h-3.5 w-3.5 shrink-0" />}
+                  <span>
+                    {isCorrect ? (
+                      <>正确！</>
+                    ) : (
+                      <>
+                        正确答案：<span className="font-semibold">{q.word.word}</span>
+                        {(answers[qIdx] ?? "").trim() && (
+                          <span className="ml-2 opacity-70">（你的答案：{answers[qIdx]}）</span>
+                        )}
+                      </>
+                    )}
+                  </span>
+                </div>
+              ) : revealed.has(qIdx) ? (
+                <div className="mt-2 flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-1.5 text-xs text-amber-900">
+                  <Lightbulb className="h-3.5 w-3.5 shrink-0" />
+                  <span>提示：<span className="font-semibold">{q.word.word}</span></span>
+                </div>
+              ) : null}
+
+              {/* Per-question reveal button */}
+              {!submitted && !revealed.has(qIdx) ? (
+                <div className="mt-2">
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    className="h-6 gap-1 px-2 text-[11px] text-muted-foreground"
+                    onClick={() => handleReveal(qIdx)}
+                  >
+                    <Eye className="h-3 w-3" />
+                    看答案
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Submit / Reset buttons */}
+      <div className="flex flex-wrap items-center gap-2">
+        {!submitted ? (
+          <Button size="sm" onClick={() => setSubmitted(true)} disabled={!allAnswered} className="gap-1.5">
+            <Check className="h-3.5 w-3.5" />
+            提交查看结果
+          </Button>
+        ) : (
+          <>
+            <div className={cn(
+              "flex items-center gap-2 rounded-lg border px-4 py-2 text-sm",
+              correctCount === questions.length
+                ? "border-emerald-200 bg-emerald-50 text-emerald-900"
+                : "border-amber-200 bg-amber-50 text-amber-900",
+            )}>
+              <Trophy className="h-4 w-4" />
+              <span className="font-medium">
+                {correctCount === questions.length ? "全部正确！" : `得分 ${correctCount}/${questions.length}`}
               </span>
             </div>
-          ) : revealed.has(currentIdx) ? (
-            <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-              <Lightbulb className="h-4 w-4 shrink-0" />
-              <span>提示：<span className="font-semibold">{current.word.word}</span></span>
-            </div>
-          ) : null}
-
-          {/* Actions */}
-          <div className="mt-5 flex items-center gap-2">
-            {!submitted && !revealed.has(currentIdx) ? (
-              <Button size="sm" variant="ghost" className="gap-1.5 text-xs" onClick={() => handleReveal(currentIdx)}>
-                <Eye className="h-3.5 w-3.5" />
-                看答案
-              </Button>
-            ) : null}
-            {!submitted && currentIdx < questions.length - 1 ? (
-              <Button
-                size="sm"
-                variant="outline"
-                className="gap-1.5"
-                onClick={() => setCurrentIdx((i) => i + 1)}
-                disabled={!answers[currentIdx]?.trim()}
-              >
-                下一题
-                <ArrowRight className="h-3.5 w-3.5" />
-              </Button>
-            ) : null}
-            {!submitted && currentIdx === questions.length - 1 ? (
-              <Button size="sm" onClick={() => setSubmitted(true)} disabled={!allAnswered} className="gap-1.5">
-                <Check className="h-3.5 w-3.5" />
-                提交查看结果
-              </Button>
-            ) : null}
-            {submitted ? (
-              <Button size="sm" variant="outline" onClick={handleReset} className="gap-1.5">
-                <RotateCcw className="h-3.5 w-3.5" />
-                重做
-              </Button>
-            ) : null}
-          </div>
-        </div>
-      ) : null}
-
-      {/* Completion screen */}
-      {submitted ? (
-        <div className={cn(
-          "rounded-2xl border p-6 text-center",
-          correctCount === questions.length
-            ? "border-emerald-200 bg-gradient-to-br from-emerald-50 to-amber-50"
-            : correctCount >= questions.length / 2
-              ? "border-amber-200 bg-gradient-to-br from-amber-50 to-rose-50"
-              : "border-rose-200 bg-gradient-to-br from-rose-50 to-amber-50",
-        )}>
-          <Trophy className={cn(
-            "mx-auto h-10 w-10",
-            correctCount === questions.length ? "text-amber-500" : "text-muted-foreground",
-          )} />
-          <h3 className="mt-2 text-lg font-semibold">
-            {correctCount === questions.length ? "全部正确！" : `得分 ${correctCount}/${questions.length}`}
-          </h3>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {correctCount === questions.length ? "太棒了！" : correctCount >= questions.length / 2 ? "不错，继续加油" : "再练几次就熟了"}
-          </p>
-        </div>
-      ) : null}
+            <Button size="sm" variant="outline" onClick={handleReset} className="gap-1.5">
+              <RotateCcw className="h-3.5 w-3.5" />
+              重做
+            </Button>
+          </>
+        )}
+        {!submitted && !allAnswered ? (
+          <span className="text-xs text-muted-foreground">
+            还差 {questions.length - answeredCount} 题
+          </span>
+        ) : null}
+      </div>
     </div>
   );
 }
