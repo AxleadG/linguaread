@@ -555,27 +555,34 @@ function WordBoxCard({
               size="sm"
               variant="outline"
               className="gap-1.5"
+              // Use onMouseDown to capture the currently focused input BEFORE
+              // the button steals focus (button click moves focus to the button).
+              onMouseDown={(e) => {
+                // Prevent the button from taking focus, so the input keeps it.
+                e.preventDefault();
+              }}
               onClick={() => {
-                // Always hint the currently focused box, regardless of content.
+                // Find the currently focused input box.
+                // Because we used onMouseDown preventDefault above, the input
+                // that was focused before clicking the button is still focused.
                 const focusedIdx = inputRefs.current.findIndex(
                   (el) => el === document.activeElement,
                 );
-                const idx = focusedIdx >= 0 ? focusedIdx : 0;
+                const idx = focusedIdx >= 0 ? focusedIdx : (hintIdx ?? 0);
                 // Cycle hint level: 0→1→2→3→0
                 if (hintIdx === idx) {
                   const newLevel = hintLevel >= 3 ? 0 : hintLevel + 1;
                   setHintLevel(newLevel);
-                  // If entering level 1, fetch English definition
                   if (newLevel === 1) {
                     void fetchEnDef(idx);
                   }
                 } else {
                   setHintIdx(idx);
                   setHintLevel(1);
-                  // Entering level 1 for a new word — fetch English definition
                   void fetchEnDef(idx);
                 }
-                focusBox(idx);
+                // Do NOT call focusBox — let the user's current focus stay
+                // where it is. The hint is displayed below regardless.
               }}
             >
               <Lightbulb className="h-3.5 w-3.5" />
