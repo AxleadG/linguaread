@@ -300,11 +300,14 @@ function WordBoxCard({
   // English definitions for each word (fetched lazily when hint level 1 is requested).
   const [enDefs, setEnDefs] = useState<Record<number, string>>({});
   const [enDefLoading, setEnDefLoading] = useState(false);
+  // Chinese definitions for each word in the sentence (fetched lazily for hint level 2).
+  const [cnDefs, setCnDefs] = useState<Record<number, string>>({});
+  const [cnDefLoading, setCnDefLoading] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   /** Fetch English definition for a word (cached in enDefs). */
   const fetchEnDef = useCallback(async (idx: number) => {
-    if (enDefs[idx]) return; // already cached
+    if (enDefs[idx]) return;
     setEnDefLoading(true);
     try {
       const res = await fetch("/api/word-en-def", {
@@ -319,11 +322,34 @@ function WordBoxCard({
         }
       }
     } catch {
-      // ignore — hint will just show "loading..."
+      // ignore
     } finally {
       setEnDefLoading(false);
     }
   }, [enDefs, targetWords, apiConfig]);
+
+  /** Fetch Chinese definition for a word (cached in cnDefs). */
+  const fetchCnDef = useCallback(async (idx: number) => {
+    if (cnDefs[idx]) return;
+    setCnDefLoading(true);
+    try {
+      const res = await fetch("/api/word", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word: targetWords[idx], context: targetSentence, config: apiConfig }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { definition?: string };
+        if (data.definition) {
+          setCnDefs((prev) => ({ ...prev, [idx]: data.definition }));
+        }
+      }
+    } catch {
+      // ignore
+    } finally {
+      setCnDefLoading(false);
+    }
+  }, [cnDefs, targetWords, targetSentence, apiConfig]);
 
   // On mount, reset timer and focus first input.
   // Empty dep array — only run once on mount.
@@ -563,8 +589,6 @@ function WordBoxCard({
               }}
               onClick={() => {
                 // Find the currently focused input box.
-                // Because we used onMouseDown preventDefault above, the input
-                // that was focused before clicking the button is still focused.
                 const focusedIdx = inputRefs.current.findIndex(
                   (el) => el === document.activeElement,
                 );
@@ -573,16 +597,13 @@ function WordBoxCard({
                 if (hintIdx === idx) {
                   const newLevel = hintLevel >= 3 ? 0 : hintLevel + 1;
                   setHintLevel(newLevel);
-                  if (newLevel === 1) {
-                    void fetchEnDef(idx);
-                  }
+                  if (newLevel === 1) void fetchEnDef(idx);
+                  if (newLevel === 2) void fetchCnDef(idx);
                 } else {
                   setHintIdx(idx);
                   setHintLevel(1);
                   void fetchEnDef(idx);
                 }
-                // Do NOT call focusBox — let the user's current focus stay
-                // where it is. The hint is displayed below regardless.
               }}
             >
               <Lightbulb className="h-3.5 w-3.5" />
@@ -627,8 +648,9 @@ function WordBoxCard({
                 </span>
               ) : hintLevel === 2 ? (
                 <span className="text-amber-900">
-                  中文释义：<span className="font-medium">{question.word.definition}</span>
-                  <span className="ml-2 text-xs text-amber-600">（同上，再想想）</span>
+                  中文释义：<span className="font-medium">
+                    {cnDefLoading ? "正在查中文字典…" : (cnDefs[hintIdx] || "（暂无中文释义）")}
+                  </span>
                 </span>
               ) : (
                 <span className="text-amber-900">
