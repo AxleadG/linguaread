@@ -566,7 +566,7 @@ function WordBoxCard({
         )}
       </div>
 
-      {/* Hint display: 3 levels — word info → Chinese def → answer */}
+      {/* Hint display: 3 levels — POS+Chinese def → Chinese def → answer+phonetic */}
       {hintIdx !== null && hintLevel > 0 && !submitted ? (
         <div className="mt-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
           <Lightbulb className="mt-0.5 h-4 w-4 shrink-0" />
@@ -578,18 +578,19 @@ function WordBoxCard({
               {hintLevel === 1 ? (
                 <span className="text-amber-900">
                   {question.word.partOfSpeech ? `${question.word.partOfSpeech} ` : ""}
-                  {question.word.phonetic ? (
-                    <span className="font-mono">{question.word.phonetic}</span>
-                  ) : ""}
-                  <span className="ml-2 text-xs text-amber-600">（词性 + 音标）</span>
+                  <span className="font-medium">{question.word.definition}</span>
                 </span>
               ) : hintLevel === 2 ? (
                 <span className="text-amber-900">
                   中文释义：<span className="font-medium">{question.word.definition}</span>
+                  <span className="ml-2 text-xs text-amber-600">（同上，再想想）</span>
                 </span>
               ) : (
                 <span className="text-amber-900">
                   答案：<span className="font-mono font-bold text-emerald-700">{targetWords[hintIdx]}</span>
+                  {question.word.phonetic ? (
+                    <span className="ml-2 font-mono text-xs text-amber-600">{question.word.phonetic}</span>
+                  ) : ""}
                 </span>
               )}
             </div>
