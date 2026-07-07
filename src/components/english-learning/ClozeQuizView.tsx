@@ -655,9 +655,6 @@ function WordBoxCard({
               ) : (
                 <span className="text-amber-900">
                   答案：<span className="font-mono font-bold text-emerald-700">{targetWords[hintIdx]}</span>
-                  {question.word.phonetic ? (
-                    <span className="ml-2 font-mono text-xs text-amber-600">{question.word.phonetic}</span>
-                  ) : ""}
                 </span>
               )}
             </div>
