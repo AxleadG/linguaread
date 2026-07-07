@@ -239,6 +239,7 @@ function TypingMode({ questions, apiConfig }: { questions: ClozeQuestion[]; apiC
         isLast={isLast}
         onSubmit={handleSubmit}
         onNext={handleNext}
+        apiConfig={apiConfig}
         onMount={() => {
           setStartTime(Date.now());
           setElapsed(0);
@@ -278,6 +279,7 @@ function WordBoxCard({
   onSubmit,
   onNext,
   onMount,
+  apiConfig,
 }: {
   question: ClozeQuestion;
   chineseText: string;
@@ -288,13 +290,40 @@ function WordBoxCard({
   onSubmit: (isCorrect: boolean) => void;
   onNext: () => void;
   onMount: () => void;
+  apiConfig?: import("@/lib/english-learning/types").ApiConfig | null;
 }) {
   // One input value per target word.
   const [inputs, setInputs] = useState<string[]>(() => targetWords.map(() => ""));
   const [hintIdx, setHintIdx] = useState<number | null>(null);
   // Hint level: 0 = none, 1 = English definition, 2 = Chinese definition, 3 = answer
   const [hintLevel, setHintLevel] = useState(0);
+  // English definitions for each word (fetched lazily when hint level 1 is requested).
+  const [enDefs, setEnDefs] = useState<Record<number, string>>({});
+  const [enDefLoading, setEnDefLoading] = useState(false);
   const inputRefs = useRef<(HTMLInputElement | null)[]>([]);
+
+  /** Fetch English definition for a word (cached in enDefs). */
+  const fetchEnDef = useCallback(async (idx: number) => {
+    if (enDefs[idx]) return; // already cached
+    setEnDefLoading(true);
+    try {
+      const res = await fetch("/api/word-en-def", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ word: targetWords[idx], config: apiConfig }),
+      });
+      if (res.ok) {
+        const data = (await res.json()) as { definition?: string };
+        if (data.definition) {
+          setEnDefs((prev) => ({ ...prev, [idx]: data.definition }));
+        }
+      }
+    } catch {
+      // ignore — hint will just show "loading..."
+    } finally {
+      setEnDefLoading(false);
+    }
+  }, [enDefs, targetWords, apiConfig]);
 
   // On mount, reset timer and focus first input.
   // Empty dep array — only run once on mount.
@@ -534,10 +563,17 @@ function WordBoxCard({
                 const idx = focusedIdx >= 0 ? focusedIdx : 0;
                 // Cycle hint level: 0→1→2→3→0
                 if (hintIdx === idx) {
-                  setHintLevel((prev) => (prev >= 3 ? 0 : prev + 1));
+                  const newLevel = hintLevel >= 3 ? 0 : hintLevel + 1;
+                  setHintLevel(newLevel);
+                  // If entering level 1, fetch English definition
+                  if (newLevel === 1) {
+                    void fetchEnDef(idx);
+                  }
                 } else {
                   setHintIdx(idx);
                   setHintLevel(1);
+                  // Entering level 1 for a new word — fetch English definition
+                  void fetchEnDef(idx);
                 }
                 focusBox(idx);
               }}
@@ -578,7 +614,9 @@ function WordBoxCard({
               {hintLevel === 1 ? (
                 <span className="text-amber-900">
                   {question.word.partOfSpeech ? `${question.word.partOfSpeech} ` : ""}
-                  <span className="font-medium">{question.word.definition}</span>
+                  <span className="font-medium italic">
+                    {enDefLoading ? "正在查英英词典…" : (enDefs[hintIdx] || "（暂无英文释义）")}
+                  </span>
                 </span>
               ) : hintLevel === 2 ? (
                 <span className="text-amber-900">
