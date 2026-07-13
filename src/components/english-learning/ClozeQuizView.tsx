@@ -81,7 +81,9 @@ function normalizeWord(w: string): string {
  */
 function splitTokens(sentence: string): { value: string; isWord: boolean }[] {
   const tokens: { value: string; isWord: boolean }[] = [];
-  const re = /([A-Za-z][A-Za-z''-]*)/g;
+  // Match words (letters) and numbers (digits) as separate "word" tokens.
+  // This ensures "3", "1999", "3.14" etc. each get their own input box.
+  const re = /([A-Za-z][A-Za-z''-]*|\d+(?:\.\d+)?)/g;
   let last = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(sentence)) !== null) {
