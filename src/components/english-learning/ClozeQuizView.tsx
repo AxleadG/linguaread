@@ -79,18 +79,17 @@ function normalizeWord(w: string): string {
  * Split a sentence into tokens: words + non-words (spaces, punctuation).
  * Returns array of { value, isWord }.
  */
-function splitTokens(sentence: string): { value: string; isWord: boolean }[] {
-  const tokens: { value: string; isWord: boolean }[] = [];
-  // Match words (letters) and numbers (digits) as separate "word" tokens.
-  // This ensures "3", "1999", "3.14" etc. each get their own input box.
+function splitTokens(sentence: string): { value: string; isWord: boolean; wordIdx?: number }[] {
+  const tokens: { value: string; isWord: boolean; wordIdx?: number }[] = [];
   const re = /([A-Za-z][A-Za-z''-]*|\d+(?:\.\d+)?)/g;
   let last = 0;
+  let wordCounter = 0;
   let m: RegExpExecArray | null;
   while ((m = re.exec(sentence)) !== null) {
     if (m.index > last) {
       tokens.push({ value: sentence.slice(last, m.index), isWord: false });
     }
-    tokens.push({ value: m[0], isWord: true });
+    tokens.push({ value: m[0], isWord: true, wordIdx: wordCounter++ });
     last = m.index + m[0].length;
   }
   if (last < sentence.length) {
@@ -164,6 +163,7 @@ function TypingMode({ questions, apiConfig }: { questions: ClozeQuestion[]; apiC
 
   const targetSentence = current.fullSentence;
   const targetWords = splitWords(targetSentence);
+  const allTokens = splitTokens(targetSentence);
   const chineseText = translations[currentIdx] || current.word.definition;
 
   const correctCount = completed.filter(Boolean).length;
@@ -237,6 +237,7 @@ function TypingMode({ questions, apiConfig }: { questions: ClozeQuestion[]; apiC
         chineseText={chineseText}
         targetSentence={targetSentence}
         targetWords={targetWords}
+        allTokens={allTokens}
         submitted={submitted}
         isLast={isLast}
         onSubmit={handleSubmit}
@@ -276,6 +277,7 @@ function WordBoxCard({
   chineseText,
   targetSentence,
   targetWords,
+  allTokens,
   submitted,
   isLast,
   onSubmit,
@@ -287,6 +289,7 @@ function WordBoxCard({
   chineseText: string;
   targetSentence: string;
   targetWords: string[];
+  allTokens: { value: string; isWord: boolean; wordIdx?: number }[];
   submitted: boolean;
   isLast: boolean;
   onSubmit: (isCorrect: boolean) => void;
@@ -487,19 +490,32 @@ function WordBoxCard({
         <p className="text-lg leading-relaxed text-foreground sm:text-xl">{chineseText}</p>
       </div>
 
-      {/* Word input boxes */}
+      {/* Word input boxes with punctuation shown as text */}
       <div className="mb-4">
         <div className="mb-2 text-xs text-muted-foreground">
-          填入英文单词（空格跳到下一个，回车提交）
+          填入英文单词（空格跳到下一个，回车提交，标点无需填写）
         </div>
-        <div className="flex flex-wrap gap-2">
-          {targetWords.map((tw, i) => {
+        <div className="flex flex-wrap items-center gap-1.5">
+          {allTokens.map((token, ti) => {
+            if (!token.isWord) {
+              // Punctuation / whitespace — render as plain text, no input box.
+              return (
+                <span
+                  key={ti}
+                  className="text-base leading-10 text-muted-foreground/60"
+                >
+                  {token.value}
+                </span>
+              );
+            }
+            // This is a word token — map to its word index for input tracking.
+            const i = token.wordIdx;
+            const tw = token.value;
             const colorClass = boxColors[i % boxColors.length];
             const typed = inputs[i] ?? "";
             const isCorrect = normalizeWord(typed) === normalizeWord(tw);
             const showFeedback = typed.trim().length > 0;
 
-            // After submit: show green for correct, red for wrong
             const finalClass = submitted
               ? isCorrect
                 ? "border-emerald-500 bg-emerald-100 text-emerald-800"
@@ -512,7 +528,7 @@ function WordBoxCard({
 
             return (
               <input
-                key={i}
+                key={ti}
                 ref={(el) => {
                   inputRefs.current[i] = el;
                 }}
