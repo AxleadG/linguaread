@@ -499,10 +499,11 @@ function WordBoxCard({
           {allTokens.map((token, ti) => {
             if (!token.isWord) {
               // Punctuation / whitespace — render as plain text, no input box.
+              // Use whitespace-pre to preserve spaces (HTML collapses them by default).
               return (
                 <span
                   key={ti}
-                  className="text-base leading-10 text-muted-foreground/60"
+                  className="whitespace-pre text-base leading-10 text-muted-foreground/60"
                 >
                   {token.value}
                 </span>
@@ -627,6 +628,17 @@ function WordBoxCard({
               <Lightbulb className="h-3.5 w-3.5" />
               提示当前词{hintIdx !== null && hintLevel > 0 ? ` (${hintLevel}/3)` : ""}
             </Button>
+            {!isLast ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                className="gap-1.5 text-xs text-muted-foreground"
+                onClick={onNext}
+              >
+                跳过此句
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Button>
+            ) : null}
             {!allFilled ? (
               <span className="text-xs text-muted-foreground">
                 还差 {targetWords.length - inputs.filter((v) => v.trim()).length} 词
